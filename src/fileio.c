@@ -46,6 +46,8 @@ struct Library *DataTypesBase;
 #define TAG_ADJ  0x41444A20 /* "ADJ ": AdjInfo */
 #define TAG_CLIP 0x434C4950 /* "CLIP": Schnittmaske (ohne Daten) */
 #define TAG_OVF  0x4F564620 /* "OVF ": x, y, w, h, zlib-Laenge, zlib(ARGB) */
+#define TAG_MOVF 0x4D4F5646 /* "MOVF": wie OVF, Ueberhang der Maske */
+#define TAG_PATH 0x50415448 /* "PATH": nach der letzten Ebene, Arbeitspfad */
 
 /* Kachel -> 4 Kanalebenen mit Differenzfilter */
 static void tile_encode(const ULONG *px, UBYTE *out)
@@ -263,6 +265,19 @@ static BOOL write_chunks(BPTR fh, Doc *d, Layer *l)
     }
     if (l->text && (!wr32(fh, TAG_TEXT) || !wr32(fh, sizeof(TextInfo)) || !wr(fh, l->text, sizeof(TextInfo))))
         return FALSE;
+    if (l->movf) {
+        Ovf *o = l->movf;
+        int clen = 0;
+        unsigned char *comp = stbi_zlib_compress((unsigned char *)o->px, o->w * o->h * 4, &clen, 8);
+        BOOL ok;
+        if (!comp)
+            return FALSE;
+        ok = wr32(fh, TAG_MOVF) && wr32(fh, 20 + clen) && wr32(fh, o->x) && wr32(fh, o->y) &&
+             wr32(fh, o->w) && wr32(fh, o->h) && wr32(fh, clen) && wr(fh, comp, clen);
+        free(comp);
+        if (!ok)
+            return FALSE;
+    }
     if (l->ovf) {
         Ovf *o = l->ovf;
         int clen = 0;
@@ -325,9 +340,10 @@ static BOOL read_chunks(BPTR fh, Doc *d, Layer *l, char *err)
                         for (k = 0; k < TILE_PIX; k++)
                             l->mask[i]->px[k] = 0xFF000000 | ((UBYTE)raw[i * TILE_PIX + k] * 0x010101);
                 l->mask_on = on ? 1 : 0;
+                mask_compact(d, l);
             }
             free(raw);
-        } else if (tag == TAG_OVF && len >= 20) {
+        } else if ((tag == TAG_OVF || tag == TAG_MOVF) && len >= 20) {
             ULONG v[5];
             char *comp, *raw;
             int rawlen = 0;
@@ -343,8 +359,16 @@ static BOOL read_chunks(BPTR fh, Doc *d, Layer *l, char *err)
                 if (raw) free(raw);
                 break;
             }
-            if ((l->ovf = ovf_new(v[0], v[1], v[2], v[3])))
-                CopyMem(raw, l->ovf->px, rawlen);
+            {
+                Ovf *o = ovf_new(v[0], v[1], v[2], v[3]);
+                if (o) {
+                    CopyMem(raw, o->px, rawlen);
+                    if (tag == TAG_MOVF)
+                        l->movf = o;
+                    else
+                        l->ovf = o;
+                }
+            }
             free(raw);
         } else if (tag == TAG_CLIP && len == 0) {
             l->clip = 1;
@@ -478,6 +502,26 @@ static Doc *load_aps(const char *path, char *err)
             goto fail;
     }
     d->active = hdr[5] < (ULONG)d->nlayers ? (LONG)hdr[5] : d->nlayers - 1;
+    {
+        /* Arbeitspfad, falls vorhanden */
+        ULONG tag, len, np, ns, v[2];
+        Path *p;
+        if (rd32(fh, &tag) && tag == TAG_PATH && rd32(fh, &len) && rd32(fh, &np) && rd32(fh, &ns) &&
+            np <= PATH_MAXPTS && ns <= PATH_MAXSUB && (p = AllocVec(sizeof(Path), MEMF_ANY | MEMF_CLEAR))) {
+            BOOL ok = TRUE;
+            p->npts = np;
+            p->nsub = ns;
+            for (i = 0; i < (LONG)ns && ok; i++) {
+                ok = rd(fh, v, 8) && v[0] < np;
+                p->sub[i] = v[0];
+                p->closed[i] = v[1] != 0;
+            }
+            if (ok && rd(fh, p->pt, np * sizeof(PathPt)))
+                d->wpath = p;
+            else
+                FreeVec(p);
+        }
+    }
     d->layer_counter = d->nlayers;
     FreeVec(present);
     Close(fh);
@@ -544,6 +588,18 @@ static BOOL save_aps(Doc *d, const char *path, char *err)
         }
         free(comp);
         if (!write_chunks(fh, d, l))
+            goto out;
+    }
+    /* Arbeitspfad (aeltere Versionen lesen hinter den Ebenen nichts mehr) */
+    if (d->wpath && d->wpath->npts) {
+        Path *p = d->wpath;
+        LONG len = 8 + p->nsub * 8 + p->npts * sizeof(PathPt);
+        if (!wr32(fh, TAG_PATH) || !wr32(fh, len) || !wr32(fh, p->npts) || !wr32(fh, p->nsub))
+            goto out;
+        for (i = 0; i < p->nsub; i++)
+            if (!wr32(fh, p->sub[i]) || !wr32(fh, p->closed[i]))
+                goto out;
+        if (!wr(fh, p->pt, p->npts * sizeof(PathPt)))
             goto out;
     }
     ok = TRUE;

@@ -615,6 +615,7 @@ static void mouse_up(void)
     if (painting) {
         stroke_to(scr2docx(mouse_x), scr2docy(mouse_y));
         stroke_end();
+        doc_masks_compact();
         painting = FALSE;
         last_bx = scr2docx(mouse_x);
         last_by = scr2docy(mouse_y);
@@ -652,6 +653,7 @@ static void mouse_up(void)
         path_mouse_up(mouse_x, mouse_y);
         penning = FALSE;
         ui_draw_options();
+        ui_draw_panels();     /* Miniatur und Protokoll */
     }
     if (cropping) {
         crop_mouse_up(mouse_x, mouse_y);
@@ -1157,6 +1159,7 @@ static void save_file(const char *path)
 
 static void after_edit(void)
 {
+    doc_masks_compact();
     ui_draw_panels();
     ui_draw_tab();
 }
@@ -1171,7 +1174,8 @@ void do_command(LONG c)
          c == CMD_EDIT_FILL || c == CMD_EDIT_STROKE ||
          c == CMD_TEXT_EDIT) && locked(LOCK_PIXELS))
         return;
-    if ((c == CMD_FREE_TF || (c >= CMD_FLIP_H && c <= CMD_ROT90CCW)) && locked(LOCK_POS | LOCK_PIXELS))
+    if ((c == CMD_FREE_TF || (c >= CMD_TF_DISTORT && c <= CMD_TF_WARP) || (c >= CMD_FLIP_H && c <= CMD_ROT90CCW)) &&
+        !transform_active() && locked(LOCK_POS | LOCK_PIXELS))
         return;
 
     /* andere Befehle schliessen einen offenen Text ab */
@@ -1183,6 +1187,7 @@ void do_command(LONG c)
     }
     /* andere Bearbeitungen schliessen eine offene Transformation ab */
     if (transform_active() && c != CMD_TF_APPLY && c != CMD_TF_CANCEL && c != CMD_FREE_TF &&
+        !(c >= CMD_TF_FREE && c <= CMD_TF_WARP) &&
         c != CMD_ZOOM_IN && c != CMD_ZOOM_OUT && c != CMD_ZOOM_FIT && c != CMD_ZOOM_100) {
         tf_dragging = tf_pending = FALSE;
         transform_apply();
@@ -1204,6 +1209,17 @@ void do_command(LONG c)
         if (!transform_active() && !painting && !moving && transform_begin()) {
             ui_draw_options();
             status_message("Return: apply   Esc: cancel");
+        }
+        break;
+    case CMD_TF_DISTORT:
+    case CMD_TF_PERSP:
+    case CMD_TF_WARP:
+        if (!transform_active())
+            do_command(CMD_FREE_TF);
+        if (transform_active()) {
+            transform_set_mode(c - CMD_TF_FREE);
+            transform_update(TRUE);
+            ui_draw_options();
         }
         break;
     case CMD_TF_APPLY:

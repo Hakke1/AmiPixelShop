@@ -201,8 +201,10 @@ anti-aliasing (Smooth, Sharp, None), <b>Character...</b> (tracking and leading),
 <li><b>Click</b> sets a corner point, <b>drag</b> sets a curve point with handles.
 <li>Click the first point to close the path. <b>Return</b> ends an open path, <b>Backspace</b> removes the last point.
 <li>Drag points or handles to edit the path.
-<li>Options bar: <b>Make Selection</b> (also Ctrl+Return), <b>Fill Path</b> (foreground color),
+<li>Options bar and <b>Paths</b> panel (third tab next to Layers and History):
+<b>Make Selection</b> (also Ctrl+Return), <b>Fill Path</b> (foreground color),
 <b>Stroke Path</b> (with the current brush), <b>Delete Path</b>.
+<li>Every path change can be undone and the path is saved in <tt>.aps</tt> files.
 </ul>
 <p><img src="images/penbar.jpg" width="820" height="34" alt="Options bar of the Pen tool"></p>
 
@@ -216,7 +218,9 @@ Desaturate, Invert (Ctrl+I), Threshold, Posterize - all with live preview.</p>
 Unsharp Mask, Emboss, Find Edges, High Pass. Ctrl+F repeats the last filter.
 With a selection, filters only work inside it. With a mask active, they work on the mask.</p>
 <p><b>Image</b>: Image Size, Canvas Size, Image Rotation (180&deg;, 90&deg;, arbitrary, flip canvas), Crop, Trim, Reveal All, Duplicate.</p>
-<p><b>Edit &gt; Transform / Free Transform</b> (Ctrl+T): scale, rotate, flip - Return applies, Esc cancels.</p>
+<p><b>Edit &gt; Transform / Free Transform</b> (Ctrl+T): scale, rotate, flip - Return applies, Esc cancels.
+While transforming, the options bar switches between <b>Free</b>, <b>Distort</b> (move each corner freely),
+<b>Perspective</b> (the opposite corner follows) and <b>Warp</b> (bend the image with a 4&times;4 mesh).</p>
 <p>Pixels moved outside the canvas are kept and come back with <b>Image &gt; Reveal All</b> or when moved back.</p>
 
 <hr>
@@ -265,9 +269,8 @@ Text and smart objects come in as pixels, layer effects are not imported. Files 
 <ul>
 <li>8 bit per channel RGB only; no CMYK, no 16 bit.
 <li>Up to 64 layers per document.
-<li>Paths are not part of Undo and are not saved yet.
 <li>PSD files can be opened but not saved.
-<li>Very large images need a lot of memory (each layer is stored as full 32 bit tiles).
+<li>Very large images need a lot of memory (each layer is stored as 32 bit tiles; empty and plain white mask areas take no memory).
 <li>No graphics tablet support.
 </ul>
 

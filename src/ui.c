@@ -51,6 +51,7 @@ static const MenuItem m_fill[] = {
     { "Foreground Color", "Alt+Backspace", CMD_FILL_FG },
     { "Background Color", "Ctrl+Backspace", CMD_FILL_BG }, END };
 static const MenuItem m_transform[] = {
+    { "Distort", "", CMD_TF_DISTORT }, { "Perspective", "", CMD_TF_PERSP }, { "Warp", "", CMD_TF_WARP }, SEP,
     { "Flip Horizontal", "", CMD_FLIP_H }, { "Flip Vertical", "", CMD_FLIP_V }, SEP,
     { "Rotate 180°", "", CMD_ROT180 }, { "Rotate 90° Clockwise", "", CMD_ROT90CW },
     { "Rotate 90° Counter Clockwise", "", CMD_ROT90CCW }, END };
@@ -387,6 +388,7 @@ static void down_arrow(LONG x, LONG y, ULONG c);
 static void color_panel_sync(void);
 UWORD ui_qualifier;             /* Qualifier des letzten Mausklicks (von main gesetzt) */
 static void choose_font(void);
+static LONG tfm_bx[4], tfm_bw[4];
 static LONG mode_bx[4], mode_bw[4], zoom_b1x, zoom_b2x, chk_x[2], chk_w[2], tf_bx, font_bx, tx_bx, al_bx, aa_bx;
 static const char *aa_names[3] = { "Smooth", "Sharp", "None" };
 static LONG pen_bx[4], pen_bw[4], as_bx;
@@ -651,6 +653,31 @@ void ui_draw_options(void)
         float sx, sy, ang;
         char buf[96];
         LONG deg;
+        {
+            static const char *ml[4] = { "Free", "Distort", "Perspective", "Warp" };
+            LONG k, m = transform_mode();
+            for (k = 0; k < 4; k++) {
+                LONG w = text_width(ml[k]) + 18;
+                tfm_bx[k] = x;
+                tfm_bw[k] = w;
+                button(x, y + 6, w, OPT_H - 12, ml[k], m == k);
+                x += w + 4;
+            }
+            x += 14;
+            if (m != 0) {
+                text(x, ty, m == 3 ? "Drag the mesh points or the inside   Return: apply   Esc: cancel"
+                              : m == 2 ? "Drag a corner: the opposite corner follows   Return: apply   Esc: cancel"
+                                       : "Drag corners or edges freely (Shift: straight)   Return: apply   Esc: cancel",
+                     COL_DIM);
+                tf_bx = SW - PANEL_W - 210;
+                button(tf_bx, y + 6, 96, OPT_H - 12, "Cancel", FALSE);
+                fill(tf_bx + 104, y + 6, 96, OPT_H - 12, COL_ACCENT);
+                frame(tf_bx + 104, y + 6, 96, OPT_H - 12, COL_LINE);
+                text(tf_bx + 104 + (96 - text_width("Apply")) / 2, y + (OPT_H - FONT_H) / 2, "Apply", 0xFFFFFFFF);
+                blit(0, y, SW, OPT_H);
+                return;
+            }
+        }
         transform_get(&sx, &sy, &ang);
         deg = (LONG)floorf(ang * 180.0f / 3.14159265f + 0.5f);
         while (deg > 180) deg -= 360;
@@ -1288,8 +1315,8 @@ void ui_draw_toolbar(void)
 
 /* ---- Panels rechts ---- */
 static LONG sw_top, ly_top, ly_list, ly_foot, ly_modey;
-static LONG panel_tab;          /* 0 = Ebenen, 1 = Protokoll */
-static LONG tab_x[3];
+static LONG panel_tab;          /* 0 = Ebenen, 1 = Protokoll, 2 = Pfade */
+static LONG tab_x[4];
 
 #define ROW_H  38
 #define HIST_H 22
@@ -1595,6 +1622,43 @@ static void draw_layers_tab(LONG y)
 #define HIST_MAX 48
 static const char *hist_names[HIST_MAX];
 static LONG hist_n, hist_cur, hist_first;
+
+/* ---- Pfade ---- */
+static LONG pa_bx[4];
+static const char *pa_lab[4] = { "Fill", "Stroke", "Selection", "Delete" };
+static const LONG pa_cmd[4] = { CMD_PATH_FILL, CMD_PATH_STROKE, CMD_PATH_SEL, CMD_PATH_DEL };
+
+static void draw_paths_tab(LONG y)
+{
+    LONG px = SW - PANEL_W, i, x;
+    ly_list = y + 4;
+    ly_foot = SH - 26;
+    if (path_exists()) {
+        LONG ry = ly_list;
+        BOOL on = tool == T_PEN;
+        fill(px + 1, ry, PANEL_W - 1, ROW_H - 1, on ? COL_ACCENT : COL_PANEL);
+        fill(px + 1, ry + ROW_H - 1, PANEL_W - 1, 1, COL_LINE);
+        fill(px + 10, ry + 4, 44, 30, 0xFFFFFFFF);
+        frame(px + 9, ry + 3, 46, 32, COL_LINE);
+        path_draw_thumb(px + 11, ry + 5, 42, 28, 0xFF202020);
+        text(px + 64, ry + 4, "Work Path", on ? 0xFFFFFFFF : COL_TEXT);
+        text(px + 64, ry + 19, on ? "visible (Pen Tool)" : "click to show and edit",
+             on ? 0xFFB8C8E0 : COL_DIM);
+    } else {
+        text(px + 12, ly_list + 8, "No path yet.", COL_DIM);
+        text(px + 12, ly_list + 8 + FONT_H + 4, "Draw one with the Pen Tool (P).", COL_DIM);
+    }
+    /* Fussleiste */
+    fill(px + 1, ly_foot, PANEL_W - 1, 26, COL_PANELHD);
+    fill(px + 1, ly_foot, PANEL_W - 1, 1, COL_LINE);
+    x = px + 8;
+    for (i = 0; i < 4; i++) {
+        LONG w = text_width(pa_lab[i]) + 14;
+        pa_bx[i] = x;
+        button(x, ly_foot + 4, w, 18, pa_lab[i], FALSE);
+        x += w + 4;
+    }
+}
 
 static void draw_history_tab(LONG y)
 {
@@ -2168,7 +2232,7 @@ static void props_release(void)
 
 void ui_draw_panels(void)
 {
-    static const char *tabs[2] = { "Layers", "History" };
+    static const char *tabs[3] = { "Layers", "History", "Paths" };
     LONG px = SW - PANEL_W, top = MENU_H + OPT_H, y;
 
     fill(px, top, PANEL_W, SH - top, COL_PANELHD);
@@ -2183,13 +2247,15 @@ void ui_draw_panels(void)
     ly_top += draw_properties(ly_top) + 6;
 
     /* Ebenen / Protokoll */
-    panel_tabs(ly_top, tabs, 2, panel_tab);
+    panel_tabs(ly_top, tabs, 3, panel_tab);
     y = ly_top + 24;
     fill(px + 1, y, PANEL_W - 1, SH - y, COL_PANEL);
     if (panel_tab == 0)
         draw_layers_tab(y);
-    else
+    else if (panel_tab == 1)
         draw_history_tab(y);
+    else
+        draw_paths_tab(y);
 
     blit(px, top, PANEL_W, SH - top);
 }
@@ -2716,6 +2782,10 @@ BOOL ui_mouse_down(LONG x, LONG y)
             return TRUE;
         }
         if (transform_active()) {
+            LONG k;
+            for (k = 1; k < 4; k++)     /* Free: zurueck geht nicht (Form bleibt verformt) */
+                if (x >= tfm_bx[k] && x < tfm_bx[k] + tfm_bw[k])
+                    do_command(CMD_TF_FREE + k);
             if (x >= tf_bx && x < tf_bx + 96)
                 do_command(CMD_TF_CANCEL);
             else if (x >= tf_bx + 104 && x < tf_bx + 200)
@@ -2885,11 +2955,26 @@ BOOL ui_mouse_down(LONG x, LONG y)
             return TRUE;
         /* Reiter */
         if (y >= ly_top && y < ly_top + 24) {
-            for (i = 0; i < 2; i++)
+            for (i = 0; i < 3; i++)
                 if (x >= tab_x[i] && x < tab_x[i + 1] && panel_tab != i) {
                     panel_tab = i;
                     ui_draw_panels();
                 }
+            return TRUE;
+        }
+        if (panel_tab == 2) {
+            /* Pfade: Zeile zeigt den Pfad (Pen Tool), Fussleiste wie im Pen Tool */
+            if (y >= ly_foot) {
+                for (i = 0; i < 4; i++)
+                    if (x >= pa_bx[i] && x < pa_bx[i] + text_width(pa_lab[i]) + 14) {
+                        if (path_exists())
+                            do_command(pa_cmd[i]);
+                        else
+                            status_message("Draw a path first");
+                    }
+            } else if (y >= ly_list && y < ly_list + ROW_H && path_exists())
+                ui_set_tool(T_PEN);
+            ui_draw_panels();
             return TRUE;
         }
         if (panel_tab == 1) {

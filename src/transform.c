@@ -6,6 +6,10 @@
  * Abbildung: Ziel = C + R(winkel) * S * (Quelle - Quellmitte).
  * Gerendert wird rueckwaerts (je Zielpixel die Quellposition), die innere
  * Schleife laeuft affin mit konstanten Schrittweiten.
+ * Distort/Perspective: vier freie Ecken, projektive Abbildung (Heckbert,
+ * Einheitsquadrat -> Viereck, invertiert). Warp: 4x4 Kontrollpunkte einer
+ * Bezier-Flaeche; die Rueckwaertsabbildung wird je Zelle (inverse bilineare
+ * Abbildung) in eine Tabelle uvmap gerechnet.
  */
 #include <exec/types.h>
 #include <exec/memory.h>
@@ -31,8 +35,19 @@ static float tcx, tcy, tsx = 1.0f, tsy = 1.0f, tang;
 static LONG bx0, by0, bx1, by1; /* zuletzt gerenderter Zielbereich */
 static BOOL tf_rendered;
 
+/* Freie Formen */
+enum { TM_AFFINE, TM_DISTORT, TM_PERSP, TM_WARP };
+static LONG tf_mode;
+static float qx[4], qy[4];      /* Ecken: oben links, oben rechts, unten rechts, unten links */
+static float wx[16], wy[16];    /* Warp-Kontrollpunkte, Zeile fuer Zeile */
+static double hinv[9];          /* Ziel -> Quelle (0..1) */
+static float *uvmap;            /* Warp: je Zielpixel u, v in Quellpixeln (u < -1e8: leer) */
+static LONG uv_x0, uv_y0, uv_w, uv_h;
+#define WARP_N 16               /* Zellen je Richtung */
+
 /* Ziehen */
-enum { DR_NONE, DR_MOVE, DR_ROTATE, DR_SCALE };
+enum { DR_NONE, DR_MOVE, DR_ROTATE, DR_SCALE, DR_POINT };
+static float d_qx[4], d_qy[4], d_wx[16], d_wy[16];
 static LONG drag, drag_handle;
 static float d_mx, d_my, d_cx, d_cy, d_sx, d_sy, d_ang;
 static LONG ov_x0, ov_y0, ov_x1, ov_y1;    /* Overlay-Box am Schirm */
@@ -102,9 +117,15 @@ static void handle_pt(LONG i, float *x, float *y)
 static void dest_bounds(LONG *x0, LONG *y0, LONG *x1, LONG *y1)
 {
     float mnx = 1e9f, mny = 1e9f, mxx = -1e9f, mxy = -1e9f, x, y;
-    LONG i;
-    for (i = 0; i < 4; i++) {
-        handle_pt(i, &x, &y);
+    LONG i, n = tf_mode == TM_WARP ? 16 : 4;
+    for (i = 0; i < n; i++) {
+        if (tf_mode == TM_AFFINE)
+            handle_pt(i, &x, &y);
+        else if (tf_mode == TM_WARP) {
+            x = wx[i]; y = wy[i];   /* Bezier liegt in der Huelle der Punkte */
+        } else {
+            x = qx[i]; y = qy[i];
+        }
         if (x < mnx) mnx = x;
         if (y < mny) mny = y;
         if (x > mxx) mxx = x;
@@ -116,6 +137,219 @@ static void dest_bounds(LONG *x0, LONG *y0, LONG *x1, LONG *y1)
     *y1 = (LONG)ceilf(mxy) + 1;
 }
 
+/* ---- Freie Formen ---- */
+
+static void build_homography(void)
+{
+    double x0 = qx[0], y0 = qy[0], x1 = qx[1], y1 = qy[1], x2 = qx[2], y2 = qy[2], x3 = qx[3], y3 = qy[3];
+    double sx = x0 - x1 + x2 - x3, sy = y0 - y1 + y2 - y3, g = 0, h = 0;
+    double a, b, c, d, e, f, A, B, C, D, E, F, G, H, I, det;
+    if (fabs(sx) > 1e-9 || fabs(sy) > 1e-9) {
+        double dx1 = x1 - x2, dx2 = x3 - x2, dy1 = y1 - y2, dy2 = y3 - y2, den = dx1 * dy2 - dx2 * dy1;
+        if (fabs(den) > 1e-12) {
+            g = (sx * dy2 - dx2 * sy) / den;
+            h = (dx1 * sy - sx * dy1) / den;
+        }
+    }
+    a = x1 - x0 + g * x1; b = x3 - x0 + h * x3; c = x0;
+    d = y1 - y0 + g * y1; e = y3 - y0 + h * y3; f = y0;
+    /* Inverse ueber die Adjunkte (i = 1) */
+    A = e - f * h; B = -(d - f * g); C = d * h - e * g;
+    D = -(b - c * h); E = a - c * g; F = -(a * h - b * g);
+    G = b * f - c * e; H = -(a * f - c * d); I = a * e - b * d;
+    det = a * A + b * B + c * C;
+    if (fabs(det) < 1e-12)
+        det = 1e-12;
+    hinv[0] = A / det; hinv[1] = D / det; hinv[2] = G / det;
+    hinv[3] = B / det; hinv[4] = E / det; hinv[5] = H / det;
+    hinv[6] = C / det; hinv[7] = F / det; hinv[8] = I / det;
+}
+
+/* Bezier-Flaeche an (s, t) */
+static void warp_eval(float s, float t, float *x, float *y)
+{
+    float bs[4], bt[4], us = 1.0f - s, ut = 1.0f - t, sx = 0, sy = 0;
+    LONG i, j;
+    bs[0] = us * us * us; bs[1] = 3 * us * us * s; bs[2] = 3 * us * s * s; bs[3] = s * s * s;
+    bt[0] = ut * ut * ut; bt[1] = 3 * ut * ut * t; bt[2] = 3 * ut * t * t; bt[3] = t * t * t;
+    for (j = 0; j < 4; j++)
+        for (i = 0; i < 4; i++) {
+            float w = bs[i] * bt[j];
+            sx += w * wx[j * 4 + i];
+            sy += w * wy[j * 4 + i];
+        }
+    *x = sx;
+    *y = sy;
+}
+
+static float crs(float ax, float ay, float bx, float by) { return ax * by - ay * bx; }
+
+/* Warp: Rueckwaertstabelle fuer den Zielbereich neu rechnen */
+static void build_uvmap(LONG x0, LONG y0, LONG x1, LONG y1)
+{
+    static float gx[(WARP_N + 1) * (WARP_N + 1)], gy[(WARP_N + 1) * (WARP_N + 1)];
+    LONG i, j, n;
+    if (uvmap)
+        FreeVec(uvmap);
+    uv_x0 = x0; uv_y0 = y0; uv_w = x1 - x0; uv_h = y1 - y0;
+    uvmap = NULL;
+    if (uv_w <= 0 || uv_h <= 0 || !(uvmap = AllocVec(uv_w * uv_h * 2 * sizeof(float), MEMF_ANY)))
+        return;
+    n = uv_w * uv_h * 2;
+    for (i = 0; i < n; i += 2)
+        uvmap[i] = -1e9f;
+    for (j = 0; j <= WARP_N; j++)
+        for (i = 0; i <= WARP_N; i++)
+            warp_eval((float)i / WARP_N, (float)j / WARP_N, &gx[j * (WARP_N + 1) + i], &gy[j * (WARP_N + 1) + i]);
+    for (j = 0; j < WARP_N; j++)
+        for (i = 0; i < WARP_N; i++) {
+            LONG k = j * (WARP_N + 1) + i, px, py, bx0, by0, bx1, by1;
+            float ax = gx[k], ay = gy[k], bx = gx[k + 1], by = gy[k + 1];
+            float cx = gx[k + WARP_N + 2], cy = gy[k + WARP_N + 2], dx = gx[k + WARP_N + 1], dy = gy[k + WARP_N + 1];
+            float ex = bx - ax, ey = by - ay, fx = dx - ax, fy = dy - ay;
+            float hx = ax - bx + cx - dx, hy = ay - by + cy - dy;
+            float cxs[4], cys[4], mnx = ax, mxx = ax, mny = ay, mxy = ay;
+            LONG c;
+            cxs[0] = ax; cxs[1] = bx; cxs[2] = cx; cxs[3] = dx;
+            cys[0] = ay; cys[1] = by; cys[2] = cy; cys[3] = dy;
+            for (c = 1; c < 4; c++) {
+                if (cxs[c] < mnx) mnx = cxs[c];
+                if (cxs[c] > mxx) mxx = cxs[c];
+                if (cys[c] < mny) mny = cys[c];
+                if (cys[c] > mxy) mxy = cys[c];
+            }
+            bx0 = (LONG)floorf(mnx); by0 = (LONG)floorf(mny);
+            bx1 = (LONG)ceilf(mxx) + 1; by1 = (LONG)ceilf(mxy) + 1;
+            if (bx0 < x0) bx0 = x0;
+            if (by0 < y0) by0 = y0;
+            if (bx1 > x1) bx1 = x1;
+            if (by1 > y1) by1 = y1;
+            for (py = by0; py < by1; py++)
+                for (px = bx0; px < bx1; px++) {
+                    /* inverse bilineare Abbildung (Zelle A B C D) */
+                    float qpx = px + 0.5f - ax, qpy = py + 0.5f - ay;
+                    float k2 = crs(hx, hy, fx, fy), k1 = crs(ex, ey, fx, fy) + crs(qpx, qpy, hx, hy);
+                    float k0 = crs(qpx, qpy, ex, ey), u, v, den;
+                    if (fabsf(k2) < 1e-6f) {
+                        if (fabsf(k1) < 1e-9f)
+                            continue;
+                        v = -k0 / k1;
+                    } else {
+                        float w = k1 * k1 - 4.0f * k0 * k2, ik2;
+                        if (w < 0.0f)
+                            continue;
+                        w = sqrtf(w);
+                        ik2 = 0.5f / k2;
+                        v = (-k1 - w) * ik2;
+                        if (v < -0.001f || v > 1.001f)
+                            v = (-k1 + w) * ik2;
+                    }
+                    den = fabsf(ex + hx * v) > fabsf(ey + hy * v) ? ex + hx * v : ey + hy * v;
+                    if (fabsf(den) < 1e-9f)
+                        continue;
+                    u = fabsf(ex + hx * v) > fabsf(ey + hy * v) ? (qpx - fx * v) / den : (qpy - fy * v) / den;
+                    if (u < -0.001f || u > 1.001f || v < -0.001f || v > 1.001f)
+                        continue;
+                    {
+                        float *m = uvmap + ((py - y0) * uv_w + (px - x0)) * 2;
+                        m[0] = (i + u) / WARP_N * fw;
+                        m[1] = (j + v) / WARP_N * fh;
+                    }
+                }
+        }
+}
+
+/* Quellposition (Pufferpixel) fuer den Zielpunkt (x, y); FALSE = keine */
+static BOOL src_uv(float x, float y, float *u, float *v)
+{
+    if (tf_mode == TM_WARP) {
+        LONG ix = (LONG)floorf(x) - uv_x0, iy = (LONG)floorf(y) - uv_y0;
+        float *m;
+        if (!uvmap || ix < 0 || iy < 0 || ix >= uv_w || iy >= uv_h)
+            return FALSE;
+        m = uvmap + (iy * uv_w + ix) * 2;
+        if (m[0] < -1e8f)
+            return FALSE;
+        *u = m[0];
+        *v = m[1];
+        return TRUE;
+    } else {
+        double W = hinv[6] * x + hinv[7] * y + hinv[8];
+        if (W <= 1e-12)
+            return FALSE;
+        *u = (float)((hinv[0] * x + hinv[1] * y + hinv[2]) / W * fw);
+        *v = (float)((hinv[3] * x + hinv[4] * y + hinv[5]) / W * fh);
+        return TRUE;
+    }
+}
+
+/* Modus wechseln: aktuelle Form uebernehmen */
+void transform_set_mode(LONG m)
+{
+    LONG i, j;
+    if (!tf_on || m == tf_mode)
+        return;
+    if (tf_mode == TM_AFFINE)
+        for (i = 0; i < 4; i++)
+            handle_pt(i, &qx[i], &qy[i]);
+    else if (tf_mode == TM_WARP) {
+        qx[0] = wx[0]; qy[0] = wy[0]; qx[1] = wx[3]; qy[1] = wy[3];
+        qx[2] = wx[15]; qy[2] = wy[15]; qx[3] = wx[12]; qy[3] = wy[12];
+    }
+    if (m == TM_WARP)
+        for (j = 0; j < 4; j++)
+            for (i = 0; i < 4; i++) {
+                float s = i / 3.0f, t = j / 3.0f;
+                wx[j * 4 + i] = (1 - s) * (1 - t) * qx[0] + s * (1 - t) * qx[1] + s * t * qx[2] + (1 - s) * t * qx[3];
+                wy[j * 4 + i] = (1 - s) * (1 - t) * qy[0] + s * (1 - t) * qy[1] + s * t * qy[2] + (1 - s) * t * qy[3];
+            }
+    if (m == TM_AFFINE) {
+        /* zurueck ins Affine geht nur ohne Verformung: Form bleibt, Modus nicht */
+        return;
+    }
+    tf_mode = m;
+    if (m != TM_WARP)
+        build_homography();
+    tf_rendered = TRUE;
+    view_inval_all();
+}
+
+/* Anfasser i des aktuellen Modus (Dokument); Rueckgabe: Anzahl */
+static LONG ctl_pt(LONG i, float *x, float *y)
+{
+    *x = *y = 0.0f;
+    if (tf_mode == TM_AFFINE) {
+        if (i < 8)
+            handle_pt(i, x, y);
+        return 8;
+    }
+    if (tf_mode == TM_WARP) {
+        if (i < 16) {
+            *x = wx[i];
+            *y = wy[i];
+        }
+        return 16;
+    }
+    if (i < 4) {
+        *x = qx[i];
+        *y = qy[i];
+    } else if (i < 8) {             /* Kantenmitten */
+        *x = (qx[i - 4] + qx[(i - 3) & 3]) * 0.5f;
+        *y = (qy[i - 4] + qy[(i - 3) & 3]) * 0.5f;
+    }
+    return 8;
+}
+
+static LONG ctl_count(void)
+{
+    return tf_mode == TM_WARP ? 16 : 8;
+}
+
+LONG transform_mode(void)
+{
+    return tf_on ? tf_mode : -1;
+}
+
 /* ---- Overlay: Rahmen und Anfasser ---- */
 
 static void tf_overlay(void)
@@ -124,6 +358,39 @@ static void tf_overlay(void)
     LONG i, sx[8], sy[8];
     if (!tf_on)
         return;
+    if (tf_mode != TM_AFFINE) {
+        LONG n = ctl_count(), k;
+        if (tf_mode == TM_WARP) {
+            /* Netz: je 4 Linien in beide Richtungen, als Kurven */
+            for (k = 0; k < 4; k++) {
+                LONG j, lx = 0, ly = 0, mx = 0, my = 0;
+                for (j = 0; j <= 24; j++) {
+                    float a, b, c, d;
+                    warp_eval(k / 3.0f, j / 24.0f, &a, &b);
+                    warp_eval(j / 24.0f, k / 3.0f, &c, &d);
+                    a = ox + a * zoom; b = oy + b * zoom; c = ox + c * zoom; d = oy + d * zoom;
+                    if (j) {
+                        line(lx, ly, (LONG)a, (LONG)b, 0xFFFFFFFF);
+                        line(mx, my, (LONG)c, (LONG)d, 0xFFFFFFFF);
+                    }
+                    lx = (LONG)a; ly = (LONG)b; mx = (LONG)c; my = (LONG)d;
+                }
+            }
+        } else
+            for (k = 0; k < 4; k++)
+                ant_line(ox + (LONG)(qx[k] * zoom), oy + (LONG)(qy[k] * zoom),
+                         ox + (LONG)(qx[(k + 1) & 3] * zoom), oy + (LONG)(qy[(k + 1) & 3] * zoom), 0);
+        for (k = 0; k < n; k++) {
+            float x, y;
+            LONG a, b;
+            ctl_pt(k, &x, &y);
+            a = ox + (LONG)floorf(x * zoom + 0.5f);
+            b = oy + (LONG)floorf(y * zoom + 0.5f);
+            fill(a - 3, b - 3, 7, 7, 0xFFFFFFFF);
+            frame(a - 4, b - 4, 9, 9, 0xFF000000);
+        }
+        return;
+    }
     for (i = 0; i < 8; i++) {
         handle_pt(i, &px[i], &py[i]);
         sx[i] = ox + (LONG)floorf(px[i] * zoom + 0.5f);
@@ -146,10 +413,10 @@ static void overlay_changed(void)
 {
     LONG i, x0 = 0x7FFFFFFF, y0 = 0x7FFFFFFF, x1 = -0x7FFFFFFF, y1 = -0x7FFFFFFF;
     view_inval(ov_x0, ov_y0, ov_x1, ov_y1);
-    for (i = 0; i < 8; i++) {
+    for (i = 0; i < ctl_count(); i++) {
         float x, y;
         LONG s, t;
-        handle_pt(i, &x, &y);
+        ctl_pt(i, &x, &y);
         s = ox + (LONG)floorf(x * zoom + 0.5f);
         t = oy + (LONG)floorf(y * zoom + 0.5f);
         if (s < x0) x0 = s;
@@ -204,6 +471,8 @@ static void render_rect(LONG x0, LONG y0, LONG x1, LONG y1, BOOL smooth)
                     ULONG p;
                     if (gx0 + x >= doc->w)
                         break;
+                    if (tf_mode != TM_AFFINE && !src_uv(gx0 + x + 0.5f, gy + 0.5f, &u, &v))
+                        continue;
                     if (!smooth) {
                         LONG iu = (LONG)floorf(u), iv = (LONG)floorf(v);
                         if (iu < 0 || iv < 0 || iu >= fw || iv >= fh)
@@ -248,6 +517,10 @@ static void render(BOOL smooth)
 {
     LONG x0, y0, x1, y1;
     dest_bounds(&x0, &y0, &x1, &y1);
+    if (tf_mode == TM_WARP)
+        build_uvmap(x0 < 0 ? 0 : x0, y0 < 0 ? 0 : y0, x1 > doc->w ? doc->w : x1, y1 > doc->h ? doc->h : y1);
+    else if (tf_mode != TM_AFFINE)
+        build_homography();
     if (tf_rendered) {
         /* alte Lage freiraeumen (falls ausserhalb der neuen) */
         if (bx0 < x0 || by0 < y0 || bx1 > x1 || by1 > y1) {
@@ -288,6 +561,9 @@ static void free_state(void)
     tf_base_own = tf_touched = NULL;
     fpx = NULL;
     fsel = NULL;
+    if (uvmap) FreeVec(uvmap);
+    uvmap = NULL;
+    tf_mode = TM_AFFINE;
     tf_on = FALSE;
     view_transform_overlay = NULL;
 }
@@ -404,9 +680,15 @@ static void transform_selection(void)
     if (y1 > doc->h) y1 = doc->h;
     for (y = y0; y < y1; y++)
         for (x = x0; x < x1; x++) {
-            float dx = x + 0.5f - tcx, dy = y + 0.5f - tcy;
+            float dx = x + 0.5f - tcx, dy = y + 0.5f - tcy, fu, fv;
             LONG iu = (LONG)floorf(m00 * dx + m01 * dy + fw * 0.5f);
             LONG iv = (LONG)floorf(m10 * dx + m11 * dy + fh * 0.5f);
+            if (tf_mode != TM_AFFINE) {
+                if (!src_uv(x + 0.5f, y + 0.5f, &fu, &fv))
+                    continue;
+                iu = (LONG)floorf(fu);
+                iv = (LONG)floorf(fv);
+            }
             if (iu >= 0 && iv >= 0 && iu < fw && iv < fh)
                 doc->sel[y * doc->w + x] = fsel[iv * fw + iu];
         }
@@ -496,11 +778,11 @@ void transform_quick(float sx, float sy, float ang)
 
 static LONG hit_handle(LONG mx, LONG my)
 {
-    LONG i;
-    for (i = 0; i < 8; i++) {
+    LONG i, n = ctl_count();
+    for (i = 0; i < n; i++) {
         float x, y;
         LONG sx, sy;
-        handle_pt(i, &x, &y);
+        ctl_pt(i, &x, &y);
         sx = ox + (LONG)floorf(x * zoom + 0.5f);
         sy = oy + (LONG)floorf(y * zoom + 0.5f);
         if (mx >= sx - 6 && mx <= sx + 6 && my >= sy - 6 && my <= sy + 6)
@@ -512,6 +794,25 @@ static LONG hit_handle(LONG mx, LONG my)
 /* Punkt im (gedrehten) Rahmen? */
 static BOOL inside(float x, float y)
 {
+    if (tf_mode != TM_AFFINE) {
+        /* Viereck aus den Eckpunkten (Warp: aeussere Ecken), Vorzeichen der Kreuzprodukte */
+        float px[4], py[4];
+        LONG k, pos = 0, neg = 0;
+        if (tf_mode == TM_WARP) {
+            px[0] = wx[0]; py[0] = wy[0]; px[1] = wx[3]; py[1] = wy[3];
+            px[2] = wx[15]; py[2] = wy[15]; px[3] = wx[12]; py[3] = wy[12];
+        } else
+            for (k = 0; k < 4; k++) {
+                px[k] = qx[k];
+                py[k] = qy[k];
+            }
+        for (k = 0; k < 4; k++) {
+            float c = crs(px[(k + 1) & 3] - px[k], py[(k + 1) & 3] - py[k], x - px[k], y - py[k]);
+            if (c > 0) pos++;
+            if (c < 0) neg++;
+        }
+        return !pos || !neg;
+    }
     float c = cosf(-tang), s = sinf(-tang), dx = x - tcx, dy = y - tcy;
     float u = c * dx - s * dy, v = s * dx + c * dy;
     return fabsf(u) <= fabsf(tsx) * fw * 0.5f && fabsf(v) <= fabsf(tsy) * fh * 0.5f;
@@ -525,6 +826,13 @@ void transform_mouse_down(LONG mx, LONG my, BOOL shift)
     d_cx = tcx; d_cy = tcy;
     d_sx = tsx; d_sy = tsy;
     d_ang = tang;
+    if (tf_mode != TM_AFFINE) {
+        memcpy(d_qx, qx, sizeof(qx)); memcpy(d_qy, qy, sizeof(qy));
+        memcpy(d_wx, wx, sizeof(wx)); memcpy(d_wy, wy, sizeof(wy));
+        drag_handle = h;
+        drag = h >= 0 ? DR_POINT : inside(x, y) ? DR_MOVE : DR_NONE;
+        return;
+    }
     if (h >= 0) {
         drag = DR_SCALE;
         drag_handle = h;
@@ -541,6 +849,43 @@ BOOL transform_mouse_move(LONG mx, LONG my, BOOL shift)
     float x = scr2docx(mx), y = scr2docy(my);
     if (drag == DR_NONE)
         return FALSE;
+    if (tf_mode != TM_AFFINE) {
+        float ddx = x - d_mx, ddy = y - d_my;
+        LONG i, h = drag_handle;
+        memcpy(qx, d_qx, sizeof(qx)); memcpy(qy, d_qy, sizeof(qy));
+        memcpy(wx, d_wx, sizeof(wx)); memcpy(wy, d_wy, sizeof(wy));
+        if (drag == DR_MOVE) {
+            for (i = 0; i < 4; i++) { qx[i] += ddx; qy[i] += ddy; }
+            for (i = 0; i < 16; i++) { wx[i] += ddx; wy[i] += ddy; }
+        } else if (tf_mode == TM_WARP) {
+            wx[h] += ddx;
+            wy[h] += ddy;
+        } else if (h >= 4) {            /* Kantenmitte: beide Ecken der Kante */
+            LONG a = h - 4, b = (h - 3) & 3;
+            if (tf_mode == TM_PERSP) {  /* Perspektive: Kante nur entlang ihrer Richtung */
+                if (a == 0 || a == 2) { ddy = 0; } else { ddx = 0; }
+            }
+            qx[a] += ddx; qy[a] += ddy; qx[b] += ddx; qy[b] += ddy;
+        } else if (tf_mode == TM_PERSP) {
+            /* Perspektive: Partnerecke derselben Kante spiegelbildlich */
+            if (fabsf(ddx) >= fabsf(ddy)) {
+                LONG p = h ^ 1;             /* 0<->1, 2<->3: waagrechte Kante */
+                qx[h] += ddx;
+                qx[p] -= ddx;
+            } else {
+                LONG p = 3 - h;             /* 0<->3, 1<->2: senkrechte Kante */
+                qy[h] += ddy;
+                qy[p] -= ddy;
+            }
+        } else {
+            qx[h] += ddx;
+            qy[h] += ddy;
+            if (shift) {                    /* Shift: nur waagrecht oder senkrecht */
+                if (fabsf(ddx) > fabsf(ddy)) qy[h] = d_qy[h]; else qx[h] = d_qx[h];
+            }
+        }
+        return TRUE;
+    }
     if (drag == DR_MOVE) {
         tcx = d_cx + (x - d_mx);
         tcy = d_cy + (y - d_my);

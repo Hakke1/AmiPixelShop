@@ -167,6 +167,8 @@ void layer_free(Layer *l, Doc *d)
         FreeVec(l->fx);
     if (l->ovf)
         FreeVec(l->ovf);
+    if (l->movf)
+        FreeVec(l->movf);
     if (l->adj)
         FreeVec(l->adj);
     FreeVec(l);
@@ -196,10 +198,53 @@ BOOL doc_target_is_mask(void)
     return doc->edit_mask && doc->layers[doc->active]->mask != NULL;
 }
 
+/* Masken sparsam: eine fehlende Maskenkachel ist ganz weiss (zeigt alles).
+ * Zum Bearbeiten wird die Maske voll belegt, danach wieder verdichtet. */
+BOOL mask_dense(Layer *l)
+{
+    LONG i, n = doc->tw * doc->th;
+    if (!l->mask)
+        return TRUE;
+    for (i = 0; i < n; i++)
+        if (!l->mask[i] && !(l->mask[i] = tile_new_gray(255)))
+            return FALSE;
+    return TRUE;
+}
+
+void mask_compact(Doc *d, Layer *l)
+{
+    LONG i, k, n = d->tw * d->th;
+    if (!l->mask)
+        return;
+    for (i = 0; i < n; i++) {
+        Tile *t = l->mask[i];
+        if (!t)
+            continue;
+        for (k = 0; k < TILE_PIX && (t->px[k] & 0xFF) == 0xFF; k++)
+            ;
+        if (k == TILE_PIX) {
+            FreeVec(t);
+            l->mask[i] = NULL;
+        }
+    }
+}
+
+/* alle Masken des Dokuments verdichten (nur ausserhalb laufender Aktionen) */
+void doc_masks_compact(void)
+{
+    LONG i;
+    for (i = 0; i < doc->nlayers; i++)
+        mask_compact(doc, doc->layers[i]);
+}
+
 Tile **doc_target(void)
 {
     Layer *l = doc->layers[doc->active];
-    return doc_target_is_mask() ? l->mask : l->tiles;
+    if (doc_target_is_mask()) {
+        mask_dense(l);          /* Bearbeiten braucht jede Kachel */
+        return l->mask;
+    }
+    return l->tiles;
 }
 
 /* Kachel mit Maske verrechnet; liefert t->px, wenn die Maske dort ganz weiss ist */
@@ -292,12 +337,13 @@ static Layer *clone_layer(Layer *src, const char *name)
     l->mask_on = src->mask_on;
     if (src->mask && (l->mask = AllocVec(doc->tw * doc->th * sizeof(Tile *), MEMF_ANY | MEMF_CLEAR)))
         for (i = 0; i < doc->tw * doc->th; i++)
-            l->mask[i] = tile_clone(src->mask[i]);
+            l->mask[i] = src->mask[i] ? tile_clone(src->mask[i]) : NULL;
     if (src->text && (l->text = AllocVec(sizeof(TextInfo), MEMF_ANY)))
         *l->text = *src->text;
     if (src->fx && (l->fx = AllocVec(sizeof(LayerFx), MEMF_ANY)))
         *l->fx = *src->fx;
     l->ovf = ovf_clone(src->ovf);
+    l->movf = ovf_clone(src->movf);
     l->fill = src->fill;
     l->lock = src->lock;
     l->kind = src->kind;
@@ -1207,6 +1253,7 @@ static void free_chain(UndoRec *chain)
         if (r->before) FreeVec(r->before);
         if (r->after) FreeVec(r->after);
         if (r->ovf) FreeVec(r->ovf);
+        if (r->path) FreeVec(r->path);
         FreeVec(r);
     }
     /* welche Ebenen werden nicht mehr gebraucht? */
@@ -1256,6 +1303,22 @@ UndoRec *undo_begin(Layer *l, const char *name)
     UndoRec *u = undo_alloc(name);
     if (u)
         u->layer = l;
+    return u;
+}
+
+/* Eintrag fuer den Arbeitspfad: merkt sich den Pfad vor der Aenderung */
+UndoRec *undo_begin_path(const char *name)
+{
+    UndoRec *u = undo_alloc(name);
+    if (!u)
+        return NULL;
+    u->is_path = TRUE;
+    if (doc->wpath && (u->path = AllocVec(sizeof(Path), MEMF_ANY)))
+        CopyMem(doc->wpath, u->path, sizeof(Path));
+    else if (doc->wpath) {
+        free_chain(u);
+        return NULL;
+    }
     return u;
 }
 
@@ -1318,7 +1381,13 @@ void undo_commit(UndoRec *u)
             doc_mark_dirty(idx % doc->tw, idx / doc->tw);
         }
     }
-    if (u->before) {
+    if (u->is_path) {
+        Path *a = u->path, *b = doc->wpath;
+        if ((!a && !b) || (a && b && !memcmp(a, b, sizeof(Path)))) {
+            free_chain(u);      /* Pfad unveraendert */
+            return;
+        }
+    } else if (u->before) {
         if ((u->after = AllocVec(sizeof(LayerState), MEMF_ANY)))
             state_capture(u->after);
         if (!u->after || (!u->n && state_equal(u->before, u->after))) {
@@ -1372,10 +1441,18 @@ void undo_commit(UndoRec *u)
 static void undo_swap(UndoRec *u)
 {
     LONG i;
+    if (u->is_path) {           /* Arbeitspfad tauschen */
+        Path *p = doc->wpath;
+        doc->wpath = u->path;
+        u->path = p;
+        view_inval_all();
+        return;
+    }
     Tile **arr = u->on_mask ? u->layer->mask : u->layer->tiles;
     if (u->has_ovf) {
-        Ovf *o = u->layer->ovf;
-        u->layer->ovf = u->ovf;
+        /* Ueberhang der Pixel bzw. der Maske tauschen */
+        Ovf **po = u->on_mask ? &u->layer->movf : &u->layer->ovf, *o = *po;
+        *po = u->ovf;
         u->ovf = o;
     }
     if (!arr)
@@ -1549,7 +1626,7 @@ void doc_mask_add(LONG how)
         how = MASK_REVEAL_ALL;
     if (!(m = AllocVec(n * sizeof(Tile *), MEMF_ANY | MEMF_CLEAR)))
         return;
-    for (i = 0; i < n; i++) {
+    for (i = 0; i < n && how != MASK_REVEAL_ALL; i++) {
         if (!(m[i] = tile_new_gray(how == MASK_HIDE_ALL ? 0 : 255))) {
             mask_free(m, doc);
             status_message("Not enough memory");
@@ -1563,8 +1640,13 @@ void doc_mask_add(LONG how)
         }
     }
     u = undo_begin_struct("Add Layer Mask");
+    if (l->movf) {              /* Ueberhang einer frueheren Maske gilt nicht mehr */
+        FreeVec(l->movf);
+        l->movf = NULL;
+    }
     l->mask = m;
     l->mask_on = 1;
+    mask_compact(doc, l);
     doc->edit_mask = TRUE;
     doc_mark_all_dirty();
     undo_commit(u);
@@ -2050,8 +2132,8 @@ static Layer *new_adjust_layer(LONG cmd)
         return NULL;
     }
     adjust_defaults(l->adj, cmd);
-    /* Maske: alles zeigen bzw. die Auswahl */
-    for (i = 0; i < nt; i++) {
+    /* Maske: alles zeigen (keine Kacheln) bzw. die Auswahl */
+    for (i = 0; i < nt && doc->hassel; i++) {
         Tile *t = tile_new_gray(255);
         if (!t) {
             layer_free(l, doc);
@@ -2069,6 +2151,7 @@ static Layer *new_adjust_layer(LONG cmd)
         l->mask[i] = t;
     }
     l->mask_on = 1;
+    mask_compact(doc, l);
     return l;
 }
 

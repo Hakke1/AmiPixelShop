@@ -167,6 +167,22 @@ static UBYTE *mm_snap;          /* Maske vor dem Verschieben als Grau, w*h */
 static Tile **mm_orig;          /* Original-Kacheln (gehoeren ans Undo, falls verschoben) */
 static UBYTE mm_def;            /* Wert fuer neu aufgedeckte Bereiche */
 static BOOL mm_moved, mm_only;
+static LONG mm_dx, mm_dy;
+static Ovf *mm_ovf;             /* Masken-Ueberhang vor dem Verschieben */
+
+/* Maske vor dem Verschieben an (x, y): innen Schnappschuss, aussen Ueberhang;
+ * 0 = nichts bekannt */
+static ULONG mm_src(LONG x, LONG y)
+{
+    if (x >= 0 && y >= 0 && x < doc->w && y < doc->h)
+        return 0xFF000000 | mm_snap[y * doc->w + x];
+    return mm_ovf ? ovf_get(mm_ovf, x, y) : 0;
+}
+
+static ULONG mm_shifted(LONG x, LONG y)
+{
+    return mm_src(x - mm_dx, y - mm_dy);
+}
 
 static void mm_begin(Layer *l)
 {
@@ -197,6 +213,8 @@ static void mm_begin(Layer *l)
     /* aussen gilt, was am Rand ueberwiegt (Photoshop: Maske laeuft weiter) */
     mm_def = white * 2 >= cnt ? 255 : 0;
     CopyMem(l->mask, mm_orig, n * sizeof(Tile *));
+    mm_ovf = l->movf;
+    mm_dx = mm_dy = 0;
     mm_layer = l;
 }
 
@@ -220,12 +238,20 @@ static void mm_shift(LONG dx, LONG dy)
                 ULONG *o = t->px + (y << TILE_SHIFT);
                 for (x = 0; x < TILE_SIZE; x++) {
                     LONG sx = (tx << TILE_SHIFT) + x - dx;
-                    ULONG v = sx >= 0 && sy >= 0 && sx < w && sy < h ? mm_snap[sy * w + sx] : mm_def;
+                    ULONG v;
+                    if (sx >= 0 && sy >= 0 && sx < w && sy < h)
+                        v = mm_snap[sy * w + sx];
+                    else {
+                        ULONG p = mm_ovf ? ovf_get(mm_ovf, sx, sy) : 0;
+                        v = p ? (p & 0xFF) : mm_def;    /* Ueberhang kommt zurueck */
+                    }
                     o[x] = 0xFF000000 | (v * 0x010101);
                 }
             }
             doc_mark_dirty(tx, ty);
         }
+    mm_dx = dx;
+    mm_dy = dy;
     mm_moved = TRUE;
 }
 
@@ -235,10 +261,26 @@ static void mm_end(BOOL chain)
     LONG i, n = ntiles();
     if (mm_layer && mm_moved) {
         UndoRec *u = undo_begin(mm_layer, "Move");
+        Ovf *no;
+        LONG x0 = 0, y0 = 0, x1 = doc->w, y1 = doc->h;
         if (u) {
             u->on_mask = TRUE;
             u->chain = chain;
         }
+        /* was ueber den Rand geschoben wurde, bleibt als Ueberhang der Maske */
+        if (mm_ovf) {
+            if (mm_ovf->x < x0) x0 = mm_ovf->x;
+            if (mm_ovf->y < y0) y0 = mm_ovf->y;
+            if (mm_ovf->x + mm_ovf->w > x1) x1 = mm_ovf->x + mm_ovf->w;
+            if (mm_ovf->y + mm_ovf->h > y1) y1 = mm_ovf->y + mm_ovf->h;
+        }
+        no = ovf_build(x0 + mm_dx, y0 + mm_dy, x1 + mm_dx, y1 + mm_dy, doc->w, doc->h, mm_shifted);
+        if (u && (no || mm_ovf)) {
+            u->has_ovf = TRUE;
+            u->ovf = mm_ovf;    /* alter Ueberhang gehoert jetzt dem Undo */
+            mm_layer->movf = no;
+        } else if (no)
+            FreeVec(no);
         for (i = 0; i < n; i++) {
             tile_update_flag(doc, mm_layer->mask[i], i % doc->tw, i / doc->tw);
             if (u)
@@ -253,6 +295,7 @@ static void mm_end(BOOL chain)
     mm_snap = NULL;
     mm_orig = NULL;
     mm_layer = NULL;
+    mm_ovf = NULL;
     mm_moved = FALSE;
 }
 

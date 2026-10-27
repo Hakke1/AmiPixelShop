@@ -17,6 +17,7 @@ static LONG pd_mode;            /* 0 nichts, 1 neuer Punkt (Griff ziehen), 2 Pun
 static LONG pd_idx;             /* gezogener Punkt */
 static float pd_dx, pd_dy;      /* Abstand Maus - Punkt beim Greifen */
 static LONG sel_pt = -1;        /* zuletzt bearbeiteter Punkt (Griffe sichtbar) */
+static UndoRec *pd_undo;        /* laufende Pfad-Aenderung */
 
 static Path *get_path(BOOL create)
 {
@@ -158,20 +159,29 @@ static BOOL near(float dx, float dy, LONG sx, LONG sy)
 
 void path_mouse_down(LONG sx, LONG sy)
 {
-    Path *p = get_path(TRUE);
+    Path *p;
     float dx = scr2docx(sx), dy = scr2docy(sy);
     LONG i, s;
-    if (!p)
+    if (pd_undo)
+        undo_commit(pd_undo);
+    pd_undo = undo_begin_path("Pen");     /* Zustand vor dem Klick */
+    if (!(p = get_path(TRUE)))
         return;
+    if (sel_pt >= p->npts)
+        sel_pt = -1;
     /* Griffe des aktuellen Punkts */
     if (sel_pt >= 0 && sel_pt < p->npts) {
         PathPt *q = &p->pt[sel_pt];
         if ((q->ox != q->x || q->oy != q->y) && near(q->ox, q->oy, sx, sy)) {
             pd_mode = 3; pd_idx = sel_pt;
+            if (pd_undo)
+                strcpy(pd_undo->name, "Drag Direction Point");
             return;
         }
         if ((q->ix != q->x || q->iy != q->y) && near(q->ix, q->iy, sx, sy)) {
             pd_mode = 4; pd_idx = sel_pt;
+            if (pd_undo)
+                strcpy(pd_undo->name, "Drag Direction Point");
             return;
         }
     }
@@ -184,8 +194,12 @@ void path_mouse_down(LONG sx, LONG sy)
                 p->drawing = FALSE;
                 sel_pt = i;
                 pd_mode = 0;
+                if (pd_undo)
+                    strcpy(pd_undo->name, "Close Path");
             } else {
                 pd_mode = 2;
+                if (pd_undo)
+                    strcpy(pd_undo->name, "Drag Anchor Point");
                 pd_idx = sel_pt = i;
                 pd_dx = dx - p->pt[i].x;
                 pd_dy = dy - p->pt[i].y;
@@ -205,6 +219,8 @@ void path_mouse_down(LONG sx, LONG sy)
         p->drawing = TRUE;
     }
     i = p->npts++;
+    if (pd_undo)
+        strcpy(pd_undo->name, "Add Anchor Point");
     p->pt[i].x = p->pt[i].ix = p->pt[i].ox = dx;
     p->pt[i].y = p->pt[i].iy = p->pt[i].oy = dy;
     pd_mode = 1;
@@ -253,6 +269,10 @@ void path_mouse_up(LONG sx, LONG sy)
         }
     }
     pd_mode = 0;
+    if (pd_undo) {
+        undo_commit(pd_undo);   /* verwirft sich selbst, wenn nichts geaendert */
+        pd_undo = NULL;
+    }
     view_inval_all();
 }
 
@@ -270,22 +290,34 @@ void path_delete_last(void)
 {
     Path *p = doc->wpath;
     LONG s = open_sub(p);
+    UndoRec *u;
     if (s < 0)
         return;
+    u = undo_begin_path("Delete Anchor Point");
     p->npts--;
     if (p->npts <= p->sub[s]) {
         p->nsub--;
         p->drawing = FALSE;
     }
     sel_pt = p->npts - 1;
+    undo_commit(u);
     view_inval_all();
 }
 
 void path_delete(void)
 {
     if (doc->wpath) {
-        FreeVec(doc->wpath);
-        doc->wpath = NULL;
+        UndoRec *u = undo_begin_path("Delete Path");
+        if (u) {
+            if (u->path)
+                FreeVec(u->path);   /* Kopie unnoetig: */
+            u->path = doc->wpath;   /* der Pfad selbst gehoert jetzt dem Undo */
+            doc->wpath = NULL;
+            undo_commit(u);
+        } else {
+            FreeVec(doc->wpath);
+            doc->wpath = NULL;
+        }
     }
     sel_pt = -1;
     view_inval_all();
@@ -352,5 +384,26 @@ void path_stroke(void)
             strcpy(doc->ucur->name, "Stroke Path");
         if (s > 0 && doc->ucur)
             doc->ucur->chain = TRUE;    /* alle Teilpfade ein Schritt */
+    }
+}
+
+/* Miniatur des Pfads (Paths-Panel), Flaeche w x h am Schirm */
+void path_draw_thumb(LONG x, LONG y, LONG w, LONG h, ULONG c)
+{
+    Path *p = doc->wpath;
+    LONG s, i;
+    float k;
+    if (!p || !flat_bufs())
+        return;
+    k = (float)w / doc->w;
+    if ((float)h / doc->h < k)
+        k = (float)h / doc->h;
+    x += (LONG)((w - doc->w * k) * 0.5f);
+    y += (LONG)((h - doc->h * k) * 0.5f);
+    for (s = 0; s < p->nsub; s++) {
+        LONG n = flatten(p, s, fx_buf, fy_buf, MAXFLAT, TRUE);
+        for (i = 1; i < n; i++)
+            line(x + (LONG)(fx_buf[i - 1] * k), y + (LONG)(fy_buf[i - 1] * k),
+                 x + (LONG)(fx_buf[i] * k), y + (LONG)(fy_buf[i] * k), c);
     }
 }

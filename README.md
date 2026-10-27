@@ -39,8 +39,8 @@ as the Amiga allows. Development is done with the help of **Claude** (Anthropic)
 | **Painting** | Brush, Eraser, Clone Stamp, History Brush, Spot Healing, Blur/Sharpen/Smudge, Dodge/Burn, Gradient, Paint Bucket, Shapes |
 | **Selections** | Marquee, Lasso, Polygonal Lasso, Quick Selection, Magic Wand, Color Range, Grow, Similar, Feather, Expand/Contract |
 | **Type** | TrueType/OpenType text that stays editable - alignment, tracking, leading, anti-aliasing |
-| **Paths** | Pen tool with Bezier curves - make selection, fill, stroke |
-| **Transform** | Free Transform, Crop, Image/Canvas Size, Image Rotation, Trim, Reveal All |
+| **Paths** | Pen tool with Bezier curves, Paths panel - make selection, fill, stroke; undoable and saved |
+| **Transform** | Free Transform, Distort, Perspective, Warp, Crop, Image/Canvas Size, Image Rotation, Trim, Reveal All |
 | **Filters** | Gaussian, Box & Motion Blur, Unsharp Mask, Sharpen, Median, Add Noise, Emboss, Find Edges, High Pass, Mosaic |
 | **Workflow** | Undo/Redo with History panel and History Brush, multiple documents, Auto-Select move tool, customizable toolbar, tooltips |
 | **Files** | Native `.aps` (keeps everything), layered `.psd` import, PNG, JPEG, plus all formats your datatypes can read |

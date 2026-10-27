@@ -259,6 +259,7 @@ static BOOL put_mask(Doc *d, Layer *l, const UBYTE *m, Rec *rc)
     for (i = 0; i < d->tw * d->th; i++)
         tile_update_flag(d, l->mask[i], i % d->tw, i / d->tw);
     l->mask_on = !(rc->mflags & 2);
+    mask_compact(d, l);
     return TRUE;
 }
 

@@ -118,18 +118,6 @@ static void resample(const ULONG *src, LONG sw, LONG sh, ULONG *dst, LONG dw, LO
         }
 }
 
-/* Inhalt versetzt in eine neue Groesse kopieren (Arbeitsflaeche) */
-static void offset_copy(const ULONG *src, LONG sw, LONG sh, ULONG *dst, LONG dw, LONG dh,
-                        LONG ox, LONG oy, ULONG fillv)
-{
-    LONG x, y;
-    for (y = 0; y < dh; y++)
-        for (x = 0; x < dw; x++) {
-            LONG sx = x - ox, sy = y - oy;
-            dst[y * dw + x] = (sx >= 0 && sy >= 0 && sx < sw && sy < sh) ? src[sy * sw + sx] : fillv;
-        }
-}
-
 /* Inhalt einer Ebene der alten Flaeche (Bild + Ueberhang), versetzt */
 static const ULONG *cs_img;
 static const Ovf *cs_ovf;
@@ -145,6 +133,19 @@ static ULONG cs_get(LONG x, LONG y)
 }
 
 static LONG build_fresh;
+
+/* Maske der alten Flaeche samt Ueberhang (Grau; 0 = unbekannt) */
+static const ULONG *cm_img;
+static const Ovf *cm_ovf;
+
+static ULONG cm_get(LONG x, LONG y)
+{
+    x -= cs_ox;
+    y -= cs_oy;
+    if (x >= 0 && y >= 0 && x < cs_w && y < cs_h)
+        return cm_img[y * cs_w + x];
+    return cm_ovf ? ovf_get(cm_ovf, x, y) : 0;
+}
 
 /* Drehen/Spiegeln der ganzen Flaeche (build mit rot_on) */
 static BOOL rot_on, rot_fh, rot_fv, rot_exact;
@@ -248,12 +249,29 @@ static Doc *build(Doc *s, LONG nw, LONG nh, BOOL scale, LONG ox, LONG oy)
                 rotate_img(src, s->w, s->h, dst, nw, nh, 0xFFFFFFFF);
             else if (scale)
                 resample(src, s->w, s->h, dst, nw, nh);
-            else
-                offset_copy(src, s->w, s->h, dst, nw, nh, ox, oy, 0xFFFFFFFF);
+            else {
+                /* Arbeitsflaeche: Ueberhang der Maske kommt zurueck bzw. nimmt auf */
+                LONG x, y, x0 = 0, y0 = 0, x1 = s->w, y1 = s->h;
+                cm_img = src; cm_ovf = sl->movf;
+                cs_w = s->w; cs_h = s->h; cs_ox = ox; cs_oy = oy;
+                for (y = 0; y < nh; y++)
+                    for (x = 0; x < nw; x++) {
+                        ULONG v = cm_get(x, y);
+                        dst[y * nw + x] = v ? v : 0xFFFFFFFF;
+                    }
+                if (sl->movf) {
+                    if (sl->movf->x < x0) x0 = sl->movf->x;
+                    if (sl->movf->y < y0) y0 = sl->movf->y;
+                    if (sl->movf->x + sl->movf->w > x1) x1 = sl->movf->x + sl->movf->w;
+                    if (sl->movf->y + sl->movf->h > y1) y1 = sl->movf->y + sl->movf->h;
+                }
+                l->movf = ovf_build(x0 + ox, y0 + oy, x1 + ox, y1 + oy, nw, nh, cm_get);
+            }
             FreeVec(src);
             src = NULL;
             if (!image_to_tiles(d, dst, l->mask, TRUE))
                 goto fail;
+            mask_compact(d, l);
         }
         /* Ebenenstil: Groessen mitskalieren */
         if (sl->fx && (l->fx = AllocVec(sizeof(LayerFx), MEMF_ANY))) {
@@ -403,13 +421,16 @@ BOOL doc_reveal_all(void)
 {
     LONG i, x0 = 0, y0 = 0, x1 = doc->w, y1 = doc->h;
     for (i = 0; i < doc->nlayers; i++) {
-        Ovf *o = doc->layers[i]->ovf;
-        if (!o)
-            continue;
-        if (o->x < x0) x0 = o->x;
-        if (o->y < y0) y0 = o->y;
-        if (o->x + o->w > x1) x1 = o->x + o->w;
-        if (o->y + o->h > y1) y1 = o->y + o->h;
+        LONG k;
+        for (k = 0; k < 2; k++) {
+            Ovf *o = k ? doc->layers[i]->movf : doc->layers[i]->ovf;
+            if (!o || (k && !doc->layers[i]->ovf))
+                continue;       /* Masken-Ueberhang nur, wo auch Pixel ueberstehen */
+            if (o->x < x0) x0 = o->x;
+            if (o->y < y0) y0 = o->y;
+            if (o->x + o->w > x1) x1 = o->x + o->w;
+            if (o->y + o->h > y1) y1 = o->y + o->h;
+        }
     }
     cr_name = "Reveal All";
     {
