@@ -1,0 +1,297 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1">
+<title>AmiPixelShop Guide</title>
+</head>
+<body bgcolor="#2b2b2b" text="#dcdcdc" link="#7fb2ff" vlink="#a98fff" alink="#ffffff">
+
+<a name="top"></a>
+<table width="100%" cellpadding="8" cellspacing="0" border="0">
+<tr><td bgcolor="#1e1e1e">
+<font size="+3"><b>AmiPixelShop</b></font><br>
+<font color="#9a9a9a">Layer-based image editor for AmigaOS 3.2 &nbsp;-&nbsp; Version 0.3 Early Beta &nbsp;-&nbsp; User Guide</font>
+</td></tr>
+</table>
+
+<p><img src="images/overview.jpg" width="640" height="360" alt="AmiPixelShop at 1920x1080"></p>
+
+<h3>Contents</h3>
+<ol>
+<li><a href="#about">About</a>
+<li><a href="#req">Requirements</a>
+<li><a href="#install">Installation</a>
+<li><a href="#start">First start and screen mode</a>
+<li><a href="#ui">The workspace</a>
+<li><a href="#tools">Tools</a>
+<li><a href="#layers">Layers, groups and masks</a>
+<li><a href="#props">Properties panel</a>
+<li><a href="#select">Selections</a>
+<li><a href="#type">Type</a>
+<li><a href="#pen">Pen tool and paths</a>
+<li><a href="#adjust">Adjustments and filters</a>
+<li><a href="#files">File formats</a>
+<li><a href="#keys">Keyboard shortcuts</a>
+<li><a href="#limits">Known limitations</a>
+<li><a href="#bugs">Reporting bugs</a>
+<li><a href="#credits">License and credits</a>
+</ol>
+
+<hr>
+<a name="about"></a>
+<h2>1. About</h2>
+<p>AmiPixelShop is a modern, layer-based image editor written natively for the Amiga.
+It is <b>not</b> a port and nothing was reverse-engineered: every function was rebuilt from
+scratch in C and 68k assembler, modelled on the workflow of today's professional image editors.</p>
+<p>This is an <b>early beta</b>. Expect bugs - and please report them (see <a href="#bugs">Reporting bugs</a>).</p>
+
+<hr>
+<a name="req"></a>
+<h2>2. Requirements</h2>
+<table border="0" cellpadding="4" cellspacing="0">
+<tr><td valign="top"><b>CPU</b></td><td><b>PiStorm</b> (Emu68, JIT-emulated 68040 with FPU) - recommended and tested.<br>
+A real 68060 with FPU might work, but will be slow at high resolutions (untested).</td></tr>
+<tr><td valign="top"><b>Graphics</b></td><td>RTG (Picasso96 / P96) with a 24 or 32 bit screen mode.<br>
+Supported resolutions: 1024&times;600 up to 1920&times;1080.</td></tr>
+<tr><td valign="top"><b>OS</b></td><td>AmigaOS 3.2 (tested with 3.2.3).</td></tr>
+<tr><td valign="top"><b>Memory</b></td><td>At least 128 MB Fast RAM, more for large images. A layer of 1920&times;1080 needs about 8 MB.</td></tr>
+<tr><td valign="top"><b>Tested on</b></td><td>Amiga 500 + PiStorm (Raspberry Pi 3A+, Emu68), AmigaOS 3.2.3, P96.</td></tr>
+</table>
+
+<hr>
+<a name="install"></a>
+<h2>3. Installation</h2>
+<ol>
+<li>Unpack the archive anywhere, e.g. <tt>Work:</tt>. You get a drawer <tt>AmiPixelShop</tt>.
+<li>Start <tt>AmiPixelShop</tt> from Workbench or from the Shell.<br>
+From the Shell you can pass an image: <tt>AmiPixelShop Work:Pictures/photo.jpg</tt>
+<li>For the <b>Type tool</b> you need TrueType fonts (<tt>.ttf</tt> / <tt>.otf</tt>) in
+<tt>FONTS:truetype/</tt>, <tt>FONTS:_ttf/</tt> or in a <tt>Fonts</tt> drawer next to the program.
+</ol>
+<p>Preferences are stored in <tt>ENV:AmiPixelShop.prefs</tt> and <tt>ENVARC:AmiPixelShop.prefs</tt>.
+Delete these files to reset all settings.</p>
+
+<hr>
+<a name="start"></a>
+<h2>4. First start and screen mode</h2>
+<p>On the first start a screen mode requester appears. Choose an RTG mode with 24 or 32 bit
+(only suitable modes from 1024&times;600 to 1920&times;1080 are listed). AmiPixelShop opens its own screen
+for maximum speed. The choice is saved; change it later with <b>Edit &gt; Screen Mode...</b>
+(takes effect on the next start).</p>
+
+<hr>
+<a name="ui"></a>
+<h2>5. The workspace</h2>
+<table border="0" cellpadding="6" cellspacing="0">
+<tr>
+<td valign="top"><img src="images/toolbar.jpg" width="40" height="680" alt="Toolbar"></td>
+<td valign="top">
+<p><b>Menu bar</b> (top) - all commands. Entries that cannot be used right now are greyed out.
+Menus are opened with a click (not with the right mouse button).</p>
+<p><b>Options bar</b> (below the menu) - settings of the current tool:</p>
+<p><img src="images/typebar.jpg" width="900" height="34" alt="Options bar of the Type tool"></p>
+<p><b>Toolbar</b> (left) - all tools. A small triangle means there are more tools in the same slot:
+hold the mouse button or click with the right button to choose. Hover over a tool to see a short tooltip.
+With <b>Edit &gt; Toolbar...</b> you choose which tools are shown.</p>
+<p>Below the tools: foreground and background color. Click to open the Color Picker,
+<tt>X</tt> swaps them, <tt>D</tt> resets to black/white.</p>
+<p><b>Document tabs</b> - several images can be open at once. <tt>Ctrl+Tab</tt> switches.</p>
+<p><b>Panels</b> (right) - Color/Swatches, <a href="#props">Properties</a> and Layers/History.</p>
+<p><b>Status bar</b> (bottom) - zoom, document size, redraw time and messages.</p>
+<p><b>Navigation</b>: hold <tt>Space</tt> and drag to scroll, mouse wheel or <tt>Ctrl++</tt> / <tt>Ctrl+-</tt> to zoom,
+<tt>Ctrl+0</tt> fits the image, <tt>Ctrl+1</tt> shows 100%.</p>
+</td>
+</tr>
+</table>
+
+<hr>
+<a name="tools"></a>
+<h2>6. Tools</h2>
+<table border="1" cellpadding="4" cellspacing="0" bordercolor="#444444">
+<tr bgcolor="#1e1e1e"><th align="left">Tool</th><th>Key</th><th align="left">What it does</th></tr>
+<tr><td>Move</td><td align="center">V</td><td>Moves the layer, the group, several selected layers or only the selected pixels. Arrow keys: 1&nbsp;px, Shift: 10&nbsp;px. <b>Auto-Select</b> in the options bar picks the layer under the mouse (Ctrl+click toggles).</td></tr>
+<tr><td>Rectangular / Elliptical Marquee</td><td align="center">M</td><td>Rectangle or ellipse selection. Shift: add, Alt: subtract, Shift+Alt: intersect.</td></tr>
+<tr><td>Lasso / Polygonal Lasso</td><td align="center">L</td><td>Freehand selection, or straight segments (Return, a double-click or a click on the start point closes).</td></tr>
+<tr><td>Quick Selection / Magic Wand</td><td align="center">W</td><td>Paint over an object and the selection snaps to its edges - or select by color with a tolerance.</td></tr>
+<tr><td>Crop</td><td align="center">C</td><td>Drag the frame or its handles, Return applies. The frame can also extend the canvas.</td></tr>
+<tr><td>Eyedropper</td><td align="center">I</td><td>Picks a color from the image (also Alt+click with the brush).</td></tr>
+<tr><td>Brush</td><td align="center">B</td><td>Paints with the foreground color. Size, hardness, opacity, flow. <tt>,</tt> and <tt>.</tt> change the size. Shift+click draws a straight line.</td></tr>
+<tr><td>Clone Stamp</td><td align="center">S</td><td>Alt+click sets the source, then paint to copy.</td></tr>
+<tr><td>History Brush</td><td align="center">Y</td><td>Paints back an earlier state; choose the source in the History panel (left column).</td></tr>
+<tr><td>Spot Healing Brush</td><td align="center">J</td><td>Paint over a spot: it is replaced with texture from the surroundings.</td></tr>
+<tr><td>Eraser</td><td align="center">E</td><td>Erases to transparency (in a mask: paints with the background color).</td></tr>
+<tr><td>Gradient / Paint Bucket</td><td align="center">G</td><td>Drag a gradient direction - or fill areas of similar color.</td></tr>
+<tr><td>Blur / Sharpen / Smudge</td><td align="center">R</td><td>Retouching with a brush.</td></tr>
+<tr><td>Dodge / Burn</td><td align="center">O</td><td>Lightens or darkens with a brush.</td></tr>
+<tr><td>Pen</td><td align="center">P</td><td>Draws paths with corner and curve points. See <a href="#pen">Pen tool</a>.</td></tr>
+<tr><td>Horizontal Type</td><td align="center">T</td><td>Editable text. See <a href="#type">Type</a>.</td></tr>
+<tr><td>Shape</td><td align="center">U</td><td>Rectangle, ellipse or line with fill and stroke - each shape on its own layer.</td></tr>
+<tr><td>Hand</td><td align="center">H</td><td>Scrolls the view (or hold Space).</td></tr>
+<tr><td>Zoom</td><td align="center">Z</td><td>Click zooms in, Alt+click zooms out.</td></tr>
+</table>
+
+<hr>
+<a name="layers"></a>
+<h2>7. Layers, groups and masks</h2>
+<table border="0" cellpadding="6" cellspacing="0">
+<tr>
+<td valign="top"><img src="images/panels.jpg" width="260" height="640" alt="Color, Properties and Layers panels"></td>
+<td valign="top">
+<p><b>Layers panel</b>: click the eye to show/hide a layer, click a row to make it active,
+drag rows to change the order or to drop a layer into a group. Double-click the name to rename.</p>
+<p>Each layer has a <b>blend mode</b> (Normal, Multiply, Screen, Overlay, Soft Light, Color, ... 25 modes),
+<b>Opacity</b> and <b>Fill</b>. <b>Lock</b>: transparency, pixels, position or all.</p>
+<p><b>Several layers</b>: Ctrl+click adds a layer to the selection, Shift+click selects a range,
+<b>Select &gt; All Layers</b> (Alt+Ctrl+A) selects all. Selected layers can be moved,
+grouped (Ctrl+G), merged (Ctrl+E) or deleted together.</p>
+<p><b>Groups</b> (Ctrl+G): fold open/closed with the triangle, blend mode <i>Pass Through</i> or isolated, with opacity and mask.</p>
+<p><b>Layer masks</b>: button at the bottom of the panel or <b>Layer &gt; Layer Mask</b>.
+Click the mask thumbnail to paint into the mask (black hides, white shows),
+Shift+click disables it. The small <b>chain</b> between the thumbnails links layer and mask -
+they move together. Click the chain to unlink them.</p>
+<p><b>Clipping masks</b> (Alt+Ctrl+G): a layer is only visible where the layer below has pixels.</p>
+<p><b>Adjustment layers</b> (round button at the bottom, or <b>Layer &gt; New Adjustment Layer</b>):
+non-destructive Brightness/Contrast, Levels, Curves, Hue/Saturation, Desaturate, Invert, Threshold, Posterize.</p>
+<p><b>Layer styles</b> (fx button): Drop Shadow, Outer Glow, Stroke.</p>
+<p><img src="images/layerstyle.jpg" width="382" height="562" alt="Layer Style dialog"></p>
+</td>
+</tr>
+</table>
+
+<hr>
+<a name="props"></a>
+<h2>8. Properties panel</h2>
+<p>Shows the settings of the active layer - click its header to fold it away:</p>
+<ul>
+<li><b>Adjustment layer</b>: its sliders, live. Curves: button <i>Edit Curves...</i>
+<li><b>Type layer</b>: size, tracking, leading and alignment
+<li><b>Pixel layer</b>: position and size, Free Transform, Flip
+<li><b>Group</b>: number of layers, Ungroup, Merge Group
+<li><b>Layer mask</b>: Invert, Apply, Disable/Enable, Delete
+</ul>
+
+<hr>
+<a name="select"></a>
+<h2>9. Selections</h2>
+<ul>
+<li>Marquee, Lasso, Quick Selection and Magic Wand tools (see <a href="#tools">Tools</a>).
+<li><b>Select &gt; Color Range...</b> - selects by color with fuzziness, with live preview.
+<li><b>Select &gt; Grow / Similar</b> - extends the selection to similar colors (uses the Magic Wand tolerance).
+<li><b>Select &gt; Modify</b> - Feather, Expand, Contract.
+<li><b>Select &gt; Inverse</b> (Shift+Ctrl+I), <b>Reselect</b> (Shift+Ctrl+D).
+<li><b>Edit &gt; Fill...</b> and <b>Edit &gt; Stroke...</b> (inside, center or outside).
+<li>Ctrl+J copies the selection to a new layer, Shift+Ctrl+J cuts it.
+</ul>
+
+<hr>
+<a name="type"></a>
+<h2>10. Type</h2>
+<p>Choose the Type tool, click into the image and type. Return starts a new line,
+<b>Ctrl+Return</b> or the <i>Commit</i> button finishes, <b>Esc</b> cancels.
+Click an existing text with the Type tool to edit it again.</p>
+<p>Options bar and <b>Type</b> menu: font, size, alignment (left / center / right),
+anti-aliasing (Smooth, Sharp, None), <b>Character...</b> (tracking and leading), <b>Paste Lorem Ipsum</b>.
+<b>Layer &gt; Rasterize Type</b> turns text into pixels.</p>
+
+<hr>
+<a name="pen"></a>
+<h2>11. Pen tool and paths</h2>
+<p><img src="images/pen.jpg" width="520" height="340" alt="A path with a curve point"></p>
+<ul>
+<li><b>Click</b> sets a corner point, <b>drag</b> sets a curve point with handles.
+<li>Click the first point to close the path. <b>Return</b> ends an open path, <b>Backspace</b> removes the last point.
+<li>Drag points or handles to edit the path.
+<li>Options bar: <b>Make Selection</b> (also Ctrl+Return), <b>Fill Path</b> (foreground color),
+<b>Stroke Path</b> (with the current brush), <b>Delete Path</b>.
+</ul>
+<p><img src="images/penbar.jpg" width="820" height="34" alt="Options bar of the Pen tool"></p>
+
+<hr>
+<a name="adjust"></a>
+<h2>12. Adjustments and filters</h2>
+<p><img src="images/menu.jpg" width="460" height="220" alt="Filter menu"></p>
+<p><b>Image &gt; Adjustments</b>: Brightness/Contrast, Levels (Ctrl+L), Curves (Ctrl+M), Hue/Saturation (Ctrl+U),
+Desaturate, Invert (Ctrl+I), Threshold, Posterize - all with live preview.</p>
+<p><b>Filter</b>: Box Blur, Gaussian Blur, Motion Blur, Add Noise, Median, Mosaic, Sharpen, Sharpen More,
+Unsharp Mask, Emboss, Find Edges, High Pass. Ctrl+F repeats the last filter.
+With a selection, filters only work inside it. With a mask active, they work on the mask.</p>
+<p><b>Image</b>: Image Size, Canvas Size, Image Rotation (180&deg;, 90&deg;, arbitrary, flip canvas), Crop, Trim, Reveal All, Duplicate.</p>
+<p><b>Edit &gt; Transform / Free Transform</b> (Ctrl+T): scale, rotate, flip - Return applies, Esc cancels.</p>
+<p>Pixels moved outside the canvas are kept and come back with <b>Image &gt; Reveal All</b> or when moved back.</p>
+
+<hr>
+<a name="files"></a>
+<h2>13. File formats</h2>
+<table border="1" cellpadding="4" cellspacing="0" bordercolor="#444444">
+<tr bgcolor="#1e1e1e"><th align="left">Format</th><th>Open</th><th>Save</th><th align="left">Notes</th></tr>
+<tr><td><tt>.aps</tt></td><td align="center">yes</td><td align="center">yes</td><td>Native format: keeps layers, groups, masks, styles, adjustment layers and editable text.</td></tr>
+<tr><td><tt>.psd</tt></td><td align="center">yes</td><td align="center">-</td><td>Layered files (RGB or grayscale, 8 bit): layers, groups, masks, clipping masks, blend modes, opacity.
+Text and smart objects come in as pixels, layer effects are not imported. Files too large for the memory open flattened.</td></tr>
+<tr><td><tt>.png</tt></td><td align="center">yes</td><td align="center">yes</td><td>With transparency.</td></tr>
+<tr><td><tt>.jpg</tt></td><td align="center">yes</td><td align="center">yes</td><td>Flattened, quality 90.</td></tr>
+<tr><td>other</td><td align="center">yes</td><td align="center">-</td><td>IFF ILBM, GIF, BMP and more via installed datatypes.</td></tr>
+</table>
+<p>Copy and paste work with the Amiga clipboard (<tt>Ctrl+C</tt> / <tt>Ctrl+V</tt>), also <b>File &gt; New from Clipboard</b>.</p>
+
+<hr>
+<a name="keys"></a>
+<h2>14. Keyboard shortcuts</h2>
+<p>"Ctrl" also works with the Amiga keys.</p>
+<table border="1" cellpadding="3" cellspacing="0" bordercolor="#444444">
+<tr bgcolor="#1e1e1e"><th align="left">Keys</th><th align="left">Command</th><th align="left">Keys</th><th align="left">Command</th></tr>
+<tr><td>Ctrl+N</td><td>New</td><td>Ctrl+Z / Shift+Ctrl+Z</td><td>Undo / Redo</td></tr>
+<tr><td>Ctrl+O</td><td>Open</td><td>Alt+Ctrl+Z</td><td>Toggle last state</td></tr>
+<tr><td>Ctrl+S / Shift+Ctrl+S</td><td>Save / Save As</td><td>Ctrl+X / C / V</td><td>Cut / Copy / Paste</td></tr>
+<tr><td>Ctrl+W / Alt+Ctrl+W</td><td>Close / Close All</td><td>Shift+Ctrl+C</td><td>Copy Merged</td></tr>
+<tr><td>Ctrl+Q</td><td>Quit</td><td>Ctrl+T</td><td>Free Transform</td></tr>
+<tr><td>Ctrl+A / Ctrl+D</td><td>Select all / Deselect</td><td>Shift+F5</td><td>Fill...</td></tr>
+<tr><td>Shift+Ctrl+I</td><td>Inverse selection</td><td>Alt / Ctrl+Backspace</td><td>Fill foreground / background</td></tr>
+<tr><td>Shift+Ctrl+D</td><td>Reselect</td><td>Shift+F6</td><td>Feather</td></tr>
+<tr><td>Shift+Ctrl+N</td><td>New layer</td><td>Ctrl+L / M / U / I</td><td>Levels / Curves / Hue/Sat / Invert</td></tr>
+<tr><td>Ctrl+J / Shift+Ctrl+J</td><td>Layer via Copy / Cut</td><td>Shift+Ctrl+U</td><td>Desaturate</td></tr>
+<tr><td>Ctrl+G / Shift+Ctrl+G</td><td>Group / Ungroup</td><td>Ctrl+F</td><td>Last filter</td></tr>
+<tr><td>Ctrl+E / Shift+Ctrl+E</td><td>Merge down / visible</td><td>Alt+Ctrl+I / C</td><td>Image Size / Canvas Size</td></tr>
+<tr><td>Alt+Ctrl+G</td><td>Clipping mask</td><td>Ctrl++ / Ctrl+-</td><td>Zoom in / out</td></tr>
+<tr><td>Alt+Ctrl+A</td><td>Select all layers</td><td>Ctrl+0 / Ctrl+1</td><td>Fit / 100%</td></tr>
+<tr><td>Ctrl+[ / Ctrl+]</td><td>Layer down / up</td><td>Ctrl+Tab</td><td>Next document</td></tr>
+<tr><td>X / D</td><td>Swap / reset colors</td><td>, / .</td><td>Brush smaller / larger</td></tr>
+<tr><td>Space (hold)</td><td>Hand tool</td><td>F12</td><td>Revert</td></tr>
+</table>
+<p>Tool keys: see the <a href="#tools">Tools</a> table. Shift + key cycles through the tools of the same slot.</p>
+
+<hr>
+<a name="limits"></a>
+<h2>15. Known limitations (early beta)</h2>
+<ul>
+<li>8 bit per channel RGB only; no CMYK, no 16 bit.
+<li>Up to 64 layers per document.
+<li>Paths are not part of Undo and are not saved yet.
+<li>PSD files can be opened but not saved.
+<li>Very large images need a lot of memory (each layer is stored as full 32 bit tiles).
+<li>No graphics tablet support.
+</ul>
+
+<hr>
+<a name="bugs"></a>
+<h2>16. Reporting bugs</h2>
+<p>Testers are very welcome! Please report bugs and ideas on GitHub:</p>
+<p><b>https://github.com/radi7777/AmiPixelShop/issues</b></p>
+<p>Helpful: what you did, what happened, your setup (PiStorm model, OS version, screen mode, RAM)
+and if possible a screenshot or the image.</p>
+
+<hr>
+<a name="credits"></a>
+<h2>17. License and credits</h2>
+<p>AmiPixelShop is released under the <b>MIT License</b> - see <tt>LICENSE</tt>.</p>
+<p>Created by a professional art designer, developed with the help of Claude (Anthropic).
+Written in C and 68k assembler. AmiPixelShop is an independent project and not affiliated with any other software vendor.</p>
+<p>Third party:</p>
+<ul>
+<li>stb_image, stb_image_write, stb_truetype by Sean Barrett - Public Domain / MIT
+<li>zlib by Jean-loup Gailly and Mark Adler - zlib License
+<li>Interface font Open Sans - Apache License 2.0
+</ul>
+<p><a href="#top">Back to top</a></p>
+
+</body>
+</html>
