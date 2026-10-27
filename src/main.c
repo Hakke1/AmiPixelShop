@@ -58,7 +58,7 @@ static LONG mouse_x, mouse_y, pan_lx, pan_ly, drag_mode;
 static float mq_x0, mq_y0, last_bx = -1.0f, last_by = -1.0f;
 static ULONG last_secs, last_mics;
 static BOOL quit;
-static BOOL moving, move_pending, tf_dragging, tf_pending, tf_shift;
+static BOOL moving, move_pending, tf_dragging, tf_pending, tf_shift, lq_dragging;
 
 static void busy(BOOL on);
 static ULONG ask_screenmode(struct Screen *on, ULONG initial);
@@ -99,7 +99,10 @@ static void update_pointer(void)
 
 static void update_cursor(void)
 {
-    if (brush_tool() && in_canvas(mouse_x, mouse_y) && !ui_dragging() && !ui_menu_open()) {
+    if (liquify_active() && !space_down && in_canvas(mouse_x, mouse_y) && !ui_dragging() && !ui_menu_open()) {
+        LONG r = (LONG)(lq_size * zoom * 0.5f + 0.5f);
+        view_set_cursor(mouse_x, mouse_y, r < 3 ? 3 : r);
+    } else if (brush_tool() && in_canvas(mouse_x, mouse_y) && !ui_dragging() && !ui_menu_open()) {
         LONG r = (LONG)(brush_size * zoom * 0.5f + 0.5f);
         view_set_cursor(mouse_x, mouse_y, r < 1 ? 1 : r);
     } else
@@ -313,6 +316,11 @@ static void mouse_down(UWORD qual, ULONG secs, ULONG mics)
     if (!in_canvas(mouse_x, mouse_y))
         return;
 
+    if (liquify_active() && !space_down) {
+        liquify_mouse_down(dx, dy);
+        lq_dragging = TRUE;
+        return;
+    }
     if (transform_active() && !space_down) {
         transform_mouse_down(mouse_x, mouse_y, (qual & QUAL_SHIFT) != 0);
         tf_dragging = TRUE;
@@ -522,7 +530,9 @@ static void mouse_move(void)
         ui_mouse_move(mouse_x, mouse_y);
         return;
     }
-    if (tf_dragging) {
+    if (lq_dragging) {
+        liquify_mouse_move(dx, dy);
+    } else if (tf_dragging) {
         if (transform_mouse_move(mouse_x, mouse_y, tf_shift))
             tf_pending = TRUE;
     } else if (painting)
@@ -600,6 +610,12 @@ static void mouse_up(void)
         ui_mouse_move(mouse_x, mouse_y);
         ui_mouse_up();
         update_cursor();
+        return;
+    }
+    if (lq_dragging) {
+        liquify_mouse_move(scr2docx(mouse_x), scr2docy(mouse_y));
+        liquify_mouse_up();
+        lq_dragging = FALSE;
         return;
     }
     if (tf_dragging) {
@@ -770,6 +786,8 @@ static BOOL handle_key(UWORD code, UWORD qual)
     case 0x45:                  /* Esc */
         if (ui_menu_open())
             ui_close_menu();
+        else if (liquify_active())
+            do_command(CMD_LQ_CANCEL);
         else if (transform_active())
             do_command(CMD_TF_CANCEL);
         else if (crop_active())
@@ -779,7 +797,9 @@ static BOOL handle_key(UWORD code, UWORD qual)
         cancel_path();
         return FALSE;
     case 0x44: case 0x43:       /* Return, Enter */
-        if (transform_active())
+        if (liquify_active())
+            do_command(CMD_LQ_APPLY);
+        else if (transform_active())
             do_command(CMD_TF_APPLY);
         else if (crop_active())
             do_command(CMD_CROP_COMMIT);
@@ -874,7 +894,8 @@ static BOOL handle_key(UWORD code, UWORD qual)
         case 't': case 'T': c = CMD_FREE_TF; break;
         case 'c': c = CMD_COPY; break;
         case 'C': c = CMD_COPY_MERGED; break;
-        case 'x': case 'X': c = CMD_CUT; break;
+        case 'x': c = CMD_CUT; break;
+        case 'X': c = CMD_FLT_LIQUIFY; break;
         case 'v': case 'V': c = CMD_PASTE; break;
         case 'n': c = CMD_NEW; break;
         case 'N': c = CMD_LAYER_NEW; break;
@@ -1062,6 +1083,10 @@ static void finish_interaction(void)
 {
     if (text_active())
         text_commit();
+    if (liquify_active()) {
+        lq_dragging = FALSE;
+        liquify_apply();
+    }
     if (transform_active()) {
         tf_dragging = tf_pending = FALSE;
         transform_apply();
@@ -1185,6 +1210,12 @@ void do_command(LONG c)
         text_commit();
         ui_draw_options();
     }
+    if (liquify_active() && c != CMD_LQ_APPLY && c != CMD_LQ_CANCEL && c != CMD_FLT_LIQUIFY &&
+        c != CMD_ZOOM_IN && c != CMD_ZOOM_OUT && c != CMD_ZOOM_FIT && c != CMD_ZOOM_100) {
+        lq_dragging = FALSE;
+        liquify_apply();
+        ui_draw_options();
+    }
     /* andere Bearbeitungen schliessen eine offene Transformation ab */
     if (transform_active() && c != CMD_TF_APPLY && c != CMD_TF_CANCEL && c != CMD_FREE_TF &&
         !(c >= CMD_TF_FREE && c <= CMD_TF_WARP) &&
@@ -1210,6 +1241,28 @@ void do_command(LONG c)
             ui_draw_options();
             status_message("Return: apply   Esc: cancel");
         }
+        break;
+    case CMD_FLT_LIQUIFY:
+        if (liquify_active() || painting || moving || locked(LOCK_PIXELS))
+            break;
+        finish_interaction();
+        if (liquify_begin())
+            status_message("Liquify: paint over the image   Return: apply   Esc: cancel");
+        ui_draw_options();
+        update_cursor();
+        break;
+    case CMD_LQ_APPLY:
+    case CMD_LQ_CANCEL:
+        lq_dragging = FALSE;
+        busy(TRUE);
+        if (c == CMD_LQ_APPLY)
+            liquify_apply();
+        else
+            liquify_cancel();
+        busy(FALSE);
+        ui_draw_options();
+        update_cursor();
+        after_edit();
         break;
     case CMD_TF_DISTORT:
     case CMD_TF_PERSP:
@@ -2099,6 +2152,8 @@ int main(int argc, char **argv)
                     quit = TRUE;
                 break;
             case IDCMP_INTUITICKS:
+                if (lq_dragging)
+                    liquify_tick();
                 apply_move();
                 view_flush();
                 view_ants_tick();

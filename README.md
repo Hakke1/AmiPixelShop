@@ -41,7 +41,7 @@ as the Amiga allows. Development is done with the help of **Claude** (Anthropic)
 | **Type** | TrueType/OpenType text that stays editable - alignment, tracking, leading, anti-aliasing |
 | **Paths** | Pen tool with Bezier curves, Paths panel - make selection, fill, stroke; undoable and saved |
 | **Transform** | Free Transform, Distort, Perspective, Warp, Crop, Image/Canvas Size, Image Rotation, Trim, Reveal All |
-| **Filters** | Gaussian, Box & Motion Blur, Unsharp Mask, Sharpen, Median, Add Noise, Emboss, Find Edges, High Pass, Mosaic |
+| **Filters** | Liquify, Gaussian, Box & Motion Blur, Unsharp Mask, Sharpen, Median, Add Noise, Emboss, Find Edges, High Pass, Mosaic |
 | **Workflow** | Undo/Redo with History panel and History Brush, multiple documents, Auto-Select move tool, customizable toolbar, tooltips |
 | **Files** | Native `.aps` (keeps everything), layered `.psd` import, PNG, JPEG, plus all formats your datatypes can read |
 

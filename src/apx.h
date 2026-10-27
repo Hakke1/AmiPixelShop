@@ -420,6 +420,15 @@ BOOL transform_active(void);
 BOOL transform_begin(void);
 void transform_apply(void);
 void transform_set_mode(LONG m);
+extern LONG lq_tool, lq_size, lq_pressure;
+BOOL liquify_active(void);
+BOOL liquify_begin(void);
+void liquify_mouse_down(float x, float y);
+void liquify_mouse_move(float x, float y);
+void liquify_mouse_up(void);
+void liquify_tick(void);
+void liquify_apply(void);
+void liquify_cancel(void);
 LONG transform_mode(void);
 void transform_cancel(void);
 void transform_quick(float sx, float sy, float ang);
@@ -625,6 +634,7 @@ enum {
     CMD_ALIGN_RIGHT, CMD_LOREM, CMD_ALL_LAYERS, CMD_DESEL_LAYERS,
     CMD_PATH_SEL, CMD_PATH_FILL, CMD_PATH_STROKE, CMD_PATH_DEL,
     CMD_TF_FREE, CMD_TF_DISTORT, CMD_TF_PERSP, CMD_TF_WARP,
+    CMD_FLT_LIQUIFY, CMD_LQ_APPLY, CMD_LQ_CANCEL,
     CMD_GROUP_NEW, CMD_GROUP, CMD_UNGROUP, CMD_MERGE_GROUP, CMD_ADJ_EDIT,
     CMD_NADJ_BRICON, CMD_NADJ_LEVELS, CMD_NADJ_CURVES, CMD_NADJ_HUESAT, CMD_NADJ_DESAT,
     CMD_NADJ_INVERT, CMD_NADJ_THRESH, CMD_NADJ_POSTER, CMD_FLIP_H, CMD_FLIP_V, CMD_ROT180, CMD_ROT90CW, CMD_ROT90CCW,

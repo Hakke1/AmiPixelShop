@@ -137,6 +137,7 @@ static const MenuItem m_fstyl[] = {
 static const MenuItem m_fother[] = { { "High Pass...", "", CMD_FLT_HIGHPASS }, END };
 static const MenuItem m_filter[] = {
     { "Last Filter", "Ctrl+F", CMD_FLT_LAST }, SEP,
+    { "Liquify...", "Shift+Ctrl+X", CMD_FLT_LIQUIFY }, SEP,
     SUB("Blur", m_fblur), SUB("Noise", m_fnoise), SUB("Pixelate", m_fpix),
     SUB("Sharpen", m_fsharp), SUB("Stylize", m_fstyl), SUB("Other", m_fother), END };
 static const MenuItem m_view[] = {
@@ -388,7 +389,9 @@ static void down_arrow(LONG x, LONG y, ULONG c);
 static void color_panel_sync(void);
 UWORD ui_qualifier;             /* Qualifier des letzten Mausklicks (von main gesetzt) */
 static void choose_font(void);
-static LONG tfm_bx[4], tfm_bw[4];
+static LONG tfm_bx[4], tfm_bw[4], lq_bx[5], lq_bw[5];
+static Slider sl_lqsize = { "Size:", &lq_size, 10, 600, "px", TRUE, nop_changed };
+static Slider sl_lqpress = { "Pressure:", &lq_pressure, 1, 100, "%", FALSE, nop_changed };
 static LONG mode_bx[4], mode_bw[4], zoom_b1x, zoom_b2x, chk_x[2], chk_w[2], tf_bx, font_bx, tx_bx, al_bx, aa_bx;
 static const char *aa_names[3] = { "Smooth", "Sharp", "None" };
 static LONG pen_bx[4], pen_bw[4], as_bx;
@@ -649,6 +652,29 @@ void ui_draw_options(void)
     x += 12;
     n_opt_sliders = 0;
 
+    if (liquify_active()) {
+        static const char *lt[5] = { "Forward Warp", "Reconstruct", "Pucker", "Bloat", "Twirl" };
+        LONG k;
+        for (k = 0; k < 5; k++) {
+            LONG w = text_width(lt[k]) + 16;
+            lq_bx[k] = x;
+            lq_bw[k] = w;
+            button(x, y + 6, w, OPT_H - 12, lt[k], lq_tool == k);
+            x += w + 4;
+        }
+        x += 12;
+        opt_sliders[n_opt_sliders++] = &sl_lqsize;
+        opt_sliders[n_opt_sliders++] = &sl_lqpress;
+        x = slider_draw(&sl_lqsize, x, ty) + 10;
+        x = slider_draw(&sl_lqpress, x, ty) + 10;
+        tf_bx = SW - PANEL_W - 210;
+        button(tf_bx, y + 6, 96, OPT_H - 12, "Cancel", FALSE);
+        fill(tf_bx + 104, y + 6, 96, OPT_H - 12, COL_ACCENT);
+        frame(tf_bx + 104, y + 6, 96, OPT_H - 12, COL_LINE);
+        text(tf_bx + 104 + (96 - text_width("Apply")) / 2, y + (OPT_H - FONT_H) / 2, "Apply", 0xFFFFFFFF);
+        blit(0, y, SW, OPT_H);
+        return;
+    }
     if (transform_active()) {
         float sx, sy, ang;
         char buf[96];
@@ -2779,6 +2805,30 @@ BOOL ui_mouse_down(LONG x, LONG y)
                 do_command(CMD_CROP_CANCEL);
             else if (x >= tf_bx + 104 && x < tf_bx + 200)
                 do_command(CMD_CROP_COMMIT);
+            return TRUE;
+        }
+        if (liquify_active()) {
+            LONG k;
+            for (k = 0; k < 5; k++)
+                if (x >= lq_bx[k] && x < lq_bx[k] + lq_bw[k]) {
+                    lq_tool = k;
+                    ui_draw_options();
+                    return TRUE;
+                }
+            if (x >= tf_bx && x < tf_bx + 96)
+                do_command(CMD_LQ_CANCEL);
+            else if (x >= tf_bx + 104 && x < tf_bx + 200)
+                do_command(CMD_LQ_APPLY);
+            else
+                for (k = 0; k < n_opt_sliders; k++)
+                    if (slider_hit(opt_sliders[k], x, y)) {
+                        drag_slider = opt_sliders[k];
+                        slider_set(drag_slider, x);
+                        ui_draw_options();
+                    } else if (value_hit(opt_sliders[k], x, y)) {
+                        slider_edit_value(opt_sliders[k]);
+                        ui_draw_options();
+                    }
             return TRUE;
         }
         if (transform_active()) {
