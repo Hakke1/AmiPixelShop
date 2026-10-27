@@ -22,6 +22,7 @@
 <li><a href="#req">Requirements</a>
 <li><a href="#install">Installation</a>
 <li><a href="#start">First start and screen mode</a>
+<li><a href="#new">New document</a>
 <li><a href="#ui">The workspace</a>
 <li><a href="#tools">Tools</a>
 <li><a href="#layers">Layers, groups and masks</a>
@@ -30,6 +31,7 @@
 <li><a href="#type">Type</a>
 <li><a href="#pen">Pen tool and paths</a>
 <li><a href="#adjust">Adjustments and filters</a>
+<li><a href="#amiga">Amiga colors and IFF</a>
 <li><a href="#files">File formats</a>
 <li><a href="#keys">Keyboard shortcuts</a>
 <li><a href="#limits">Known limitations</a>
@@ -79,8 +81,21 @@ Delete these files to reset all settings.</p>
 for maximum speed. The choice is saved; change it any time with <b>Edit &gt; Screen Mode...</b> - the new mode is used immediately.</p>
 
 <hr>
+<a name="new"></a>
+<h2>5. New document</h2>
+<p><b>File &gt; New...</b> (Ctrl+N) opens the New Document dialog. Pick a preset from the tabs
+<i>Recent</i>, <i>Photo</i>, <i>Print</i>, <i>Web</i>, <i>Mobile</i>, <i>Film &amp; Video</i>, <b>Amiga</b> or <i>Saved</i>,
+or type your own size on the right. <b>Save Preset...</b> keeps your own sizes in the <i>Saved</i> tab.</p>
+<p><img src="images/newdoc.jpg" width="620" height="402" alt="New Document dialog with the Amiga presets"></p>
+<p>The <b>Amiga</b> tab has the classic screen formats: PAL and NTSC Lowres, Hires, Interlace and Overscan,
+Super-Hires, Productivity, AGA, EHB, HAM6 and HAM8, a Workbench icon and an RTG size.
+The <b>Color Mode</b> of such a document (for example <i>Amiga EHB (64 colors)</i>) is remembered:
+<b>Filter &gt; Amiga &gt; Reduce Colors</b> and the IFF export start with these settings.
+You always paint in full color - the colors are reduced at the end (see <a href="#amiga">Amiga colors and IFF</a>).</p>
+
+<hr>
 <a name="ui"></a>
-<h2>5. The workspace</h2>
+<h2>6. The workspace</h2>
 <table border="0" cellpadding="6" cellspacing="0">
 <tr>
 <td valign="top"><img src="images/toolbar.jpg" width="40" height="680" alt="Toolbar"></td>
@@ -105,7 +120,7 @@ With <b>Edit &gt; Toolbar...</b> you choose which tools are shown.</p>
 
 <hr>
 <a name="tools"></a>
-<h2>6. Tools</h2>
+<h2>7. Tools</h2>
 <table border="1" cellpadding="4" cellspacing="0" bordercolor="#444444">
 <tr bgcolor="#1e1e1e"><th align="left">Tool</th><th>Key</th><th align="left">What it does</th></tr>
 <tr><td>Move</td><td align="center">V</td><td>Moves the layer, the group, several selected layers or only the selected pixels. Arrow keys: 1&nbsp;px, Shift: 10&nbsp;px. <b>Auto-Select</b> in the options bar picks the layer under the mouse (Ctrl+click toggles).</td></tr>
@@ -131,7 +146,7 @@ With <b>Edit &gt; Toolbar...</b> you choose which tools are shown.</p>
 
 <hr>
 <a name="layers"></a>
-<h2>7. Layers, groups and masks</h2>
+<h2>8. Layers, groups and masks</h2>
 <table border="0" cellpadding="6" cellspacing="0">
 <tr>
 <td valign="top"><img src="images/panels.jpg" width="260" height="640" alt="Color, Properties and Layers panels"></td>
@@ -159,7 +174,7 @@ non-destructive Brightness/Contrast, Levels, Curves, Hue/Saturation, Desaturate,
 
 <hr>
 <a name="props"></a>
-<h2>8. Properties panel</h2>
+<h2>9. Properties panel</h2>
 <p>Shows the settings of the active layer - click its header to fold it away:</p>
 <ul>
 <li><b>Adjustment layer</b>: its sliders, live. Curves: button <i>Edit Curves...</i>
@@ -171,7 +186,7 @@ non-destructive Brightness/Contrast, Levels, Curves, Hue/Saturation, Desaturate,
 
 <hr>
 <a name="select"></a>
-<h2>9. Selections</h2>
+<h2>10. Selections</h2>
 <ul>
 <li>Marquee, Lasso, Quick Selection and Magic Wand tools (see <a href="#tools">Tools</a>).
 <li><b>Select &gt; Color Range...</b> - selects by color with fuzziness, with live preview.
@@ -184,7 +199,7 @@ non-destructive Brightness/Contrast, Levels, Curves, Hue/Saturation, Desaturate,
 
 <hr>
 <a name="type"></a>
-<h2>10. Type</h2>
+<h2>11. Type</h2>
 <p>Choose the Type tool, click into the image and type - or drag a box for <b>paragraph text</b> that wraps automatically. Return starts a new line,
 <b>Ctrl+Return</b> or the <i>Commit</i> button finishes, <b>Esc</b> cancels.
 Click an existing text with the Type tool to edit it again.</p>
@@ -194,7 +209,7 @@ anti-aliasing (Smooth, Sharp, None), <b>Character...</b> (tracking and leading),
 
 <hr>
 <a name="pen"></a>
-<h2>11. Pen tool and paths</h2>
+<h2>12. Pen tool and paths</h2>
 <p><img src="images/pen.jpg" width="520" height="340" alt="A path with a curve point"></p>
 <ul>
 <li><b>Click</b> sets a corner point, <b>drag</b> sets a curve point with handles.
@@ -209,7 +224,7 @@ anti-aliasing (Smooth, Sharp, None), <b>Character...</b> (tracking and leading),
 
 <hr>
 <a name="adjust"></a>
-<h2>12. Adjustments and filters</h2>
+<h2>13. Adjustments and filters</h2>
 <p><img src="images/menu.jpg" width="460" height="220" alt="Filter menu"></p>
 <p><b>Image &gt; Adjustments</b>: Brightness/Contrast, Levels (Ctrl+L), Curves (Ctrl+M), Hue/Saturation (Ctrl+U),
 Desaturate, Invert (Ctrl+I), Threshold, Posterize - all with live preview.</p>
@@ -226,8 +241,30 @@ While transforming, the options bar switches between <b>Free</b>, <b>Distort</b>
 <p>Pixels moved outside the canvas are kept and come back with <b>Image &gt; Reveal All</b> or when moved back.</p>
 
 <hr>
+<a name="amiga"></a>
+<h2>14. Amiga colors and IFF</h2>
+<p><b>Filter &gt; Amiga &gt; Reduce Colors...</b> builds the best palette for the image and shows the result live,
+together with the palette:</p>
+<p><img src="images/reduce.jpg" width="620" height="378" alt="Reduce Colors with a 32 color OCS palette"></p>
+<ul>
+<li><b>Palette</b>: <i>Adaptive</i> (24 bit colors, for AGA and RTG), <i>OCS 12-bit</i> (4 bit per channel, like OCS/ECS hardware),
+<i>MagicWB</i> (the 8 MagicWB colors stay, the rest is chosen for the image) or <i>Grayscale</i>.
+<li><b>Mode</b>: <i>Normal</i> with 2 to 256 colors, <i>EHB</i> (32 colors plus 32 half-bright ones - both halves are optimized together),
+<i>HAM6</i> and <i>HAM8</i> (each pixel picks the best of a palette color or changing one channel of its left neighbour).
+<li><b>Dither</b>: <i>None</i>, <i>Floyd-Steinberg</i> (smoothest gradients), <i>Atkinson</i> (crisper, keeps more contrast)
+or <i>Ordered</i> (regular 8&times;8 pattern, good for animations). <b>Amount</b> sets the strength.
+<li><b>Optimize Palette</b> refines the palette further for the best match as the eye sees it.
+</ul>
+<p><b>File &gt; Export as IFF ILBM...</b> writes a standard IFF picture (also <b>Save As</b> with the ending <tt>.iff</tt>):
+with the palette of the last <i>Reduce Colors</i>, or reduced automatically to the color mode of the document.
+The screen mode (Lowres/Hires, Interlace, EHB, HAM) is stored in the file, so viewers and paint programs show it correctly.
+The palette and settings are also saved in <tt>.aps</tt> files.</p>
+<p>IFF pictures from other programs open with their palette and mode: 1 to 8 bitplanes, EHB, HAM6, HAM8, 24 bit,
+mask plane and DPaint PBM. Opened, edited and exported again, the palette stays the same.</p>
+
+<hr>
 <a name="files"></a>
-<h2>13. File formats</h2>
+<h2>15. File formats</h2>
 <table border="1" cellpadding="4" cellspacing="0" bordercolor="#444444">
 <tr bgcolor="#1e1e1e"><th align="left">Format</th><th>Open</th><th>Save</th><th align="left">Notes</th></tr>
 <tr><td><tt>.aps</tt></td><td align="center">yes</td><td align="center">yes</td><td>Native format: keeps layers, groups, masks, styles, adjustment layers and editable text.</td></tr>
@@ -236,13 +273,15 @@ adjustment layers (Levels, Hue/Saturation, Brightness/Contrast, Invert, Threshol
 Text and smart objects come in as pixels. Files too large for the memory open flattened.</td></tr>
 <tr><td><tt>.png</tt></td><td align="center">yes</td><td align="center">yes</td><td>With transparency.</td></tr>
 <tr><td><tt>.jpg</tt></td><td align="center">yes</td><td align="center">yes</td><td>Flattened, quality 90.</td></tr>
-<tr><td>other</td><td align="center">yes</td><td align="center">-</td><td>IFF ILBM, GIF, BMP and more via installed datatypes.</td></tr>
+<tr><td><tt>.iff</tt></td><td align="center">yes</td><td align="center">yes</td><td>IFF ILBM and PBM, 1-8 bitplanes, EHB, HAM6/HAM8, 24 bit. Export with palette and screen mode, see <a href="#amiga">Amiga colors and IFF</a>.</td></tr>
+<tr><td>other</td><td align="center">yes</td><td align="center">-</td><td>GIF, BMP and more via installed datatypes.</td></tr>
 </table>
+<p>From the Shell several pictures open at once: <tt>AmiPixelShop pic1.iff pic2.png pic3.psd</tt>.</p>
 <p>Copy and paste work with the Amiga clipboard (<tt>Ctrl+C</tt> / <tt>Ctrl+V</tt>), also <b>File &gt; New from Clipboard</b>.</p>
 
 <hr>
 <a name="keys"></a>
-<h2>14. Keyboard shortcuts</h2>
+<h2>16. Keyboard shortcuts</h2>
 <p>"Ctrl" also works with the Amiga keys.</p>
 <table border="1" cellpadding="3" cellspacing="0" bordercolor="#444444">
 <tr bgcolor="#1e1e1e"><th align="left">Keys</th><th align="left">Command</th><th align="left">Keys</th><th align="left">Command</th></tr>
@@ -269,7 +308,7 @@ Text and smart objects come in as pixels. Files too large for the memory open fl
 
 <hr>
 <a name="limits"></a>
-<h2>15. Known limitations (early beta)</h2>
+<h2>17. Known limitations (early beta)</h2>
 <ul>
 <li>8 bit per channel RGB only; no CMYK, no 16 bit.
 <li>Up to 64 layers per document.
@@ -280,7 +319,7 @@ Text and smart objects come in as pixels. Files too large for the memory open fl
 
 <hr>
 <a name="bugs"></a>
-<h2>16. Reporting bugs</h2>
+<h2>18. Reporting bugs</h2>
 <p>Testers are very welcome! Please report bugs and ideas on GitHub:</p>
 <p><b>https://github.com/radi7777/AmiPixelShop/issues</b></p>
 <p>Helpful: what you did, what happened, your setup (PiStorm model, OS version, screen mode, RAM)
@@ -288,7 +327,7 @@ and if possible a screenshot or the image.</p>
 
 <hr>
 <a name="credits"></a>
-<h2>17. License and credits</h2>
+<h2>19. License and credits</h2>
 <p>AmiPixelShop is released under the <b>MIT License</b> - see <tt>LICENSE</tt>.</p>
 <p>Created by a professional art designer, developed with the help of Claude (Anthropic).
 Written in C and 68k assembler. AmiPixelShop is an independent project and not affiliated with any other software vendor.</p>

@@ -36,7 +36,11 @@ Features
 - Filters: gaussian/box/motion blur, unsharp mask, median, noise, emboss,
   find edges, high pass, mosaic
 - Undo/redo with history panel, multiple documents
-- Native .aps format, layered PSD import, PNG, JPEG, datatypes
+- Reduce Colors: optimized palettes (24 bit, OCS 12 bit, MagicWB),
+  2-256 colors, EHB, HAM6, HAM8, dithering, live preview
+- New Document presets for the classic Amiga screen modes
+- Native .aps format, layered PSD import, IFF ILBM import and export,
+  PNG, JPEG, datatypes
 
 Requirements
 ------------
