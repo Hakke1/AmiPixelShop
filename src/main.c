@@ -12,6 +12,7 @@
 #include <devices/timer.h>
 #include <devices/inputevent.h>
 #include <libraries/Picasso96.h>
+#include <workbench/startup.h>
 #include <proto/exec.h>
 #include <proto/dos.h>
 #include <proto/intuition.h>
@@ -28,7 +29,7 @@
 #include <math.h>
 #include "apx.h"
 
-#define APS_VERSION "0.3"
+#define APS_VERSION "0.4"
 /* fuer "Version AmiPixelShop" in der Shell */
 static const char verstag[] __attribute__((used)) = "$VER: AmiPixelShop " APS_VERSION " (27.10.2026) Early Beta";
 
@@ -2255,6 +2256,18 @@ int main(int argc, char **argv)
         LONG i;
         for (i = 1; i <= nfiles; i++)
             open_file(argv[i]);
+    } else if (argc == 0 && argv) {
+        /* Workbench: mitgegebene Bild-Icons (Shift-Klick, Standardprogramm) */
+        struct WBStartup *wbs = (struct WBStartup *)argv;
+        static char wbpath[512];
+        LONG i;
+        for (i = 1; i < wbs->sm_NumArgs; i++) {
+            struct WBArg *a = &wbs->sm_ArgList[i];
+            if (!a->wa_Lock || !a->wa_Name || !a->wa_Name[0] ||
+                !NameFromLock(a->wa_Lock, wbpath, sizeof(wbpath)) || !AddPart(wbpath, a->wa_Name, sizeof(wbpath)))
+                continue;
+            open_file(wbpath);
+        }
     }
 
     while (!quit) {
