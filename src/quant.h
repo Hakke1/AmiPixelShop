@@ -18,7 +18,7 @@ typedef short BOOL;
 #include <exec/types.h>
 #endif
 
-enum { QP_ADAPTIVE, QP_OCS, QP_WORKBENCH, QP_GRAY };            /* Palette */
+enum { QP_ADAPTIVE, QP_OCS, QP_WORKBENCH, QP_GRAY, QP_FIXED }; /* Palette */
 enum { QM_NORMAL, QM_EHB, QM_HAM6, QM_HAM8 };                   /* Bildschirmmodus */
 enum { QD_NONE, QD_FS, QD_ATKINSON, QD_ORDERED };               /* Dithering */
 
@@ -29,13 +29,15 @@ typedef struct {
     LONG dither;                /* QD_* */
     LONG amount;                /* Dither-Staerke 0..100 */
     LONG optimize;              /* Palette mit k-Means verfeinern */
+    const struct QPalette *fixed;   /* QP_FIXED: vorgegebene Palette */
 } QuantOpts;
 
-typedef struct {
+typedef struct QPalette {
     ULONG col[256];             /* 0x00RRGGBB */
     LONG n;                     /* Eintraege (EHB: 64, HAM6: 16, HAM8: 64) */
     LONG mode;                  /* QM_* */
     BOOL ocs;                   /* 12-Bit-Palette (4 Bit je Kanal) */
+    BOOL transp;                /* Index 0 ist transparent (Brush), opake Pixel nutzen ihn nicht */
 } QPalette;
 
 /* Palette aus Pixeln (ARGB straight; Alpha < 128 zaehlt nicht) bilden */

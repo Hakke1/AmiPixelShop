@@ -276,7 +276,7 @@ static LONG wu(LONG k, ULONG *out)
 
 /* ---- k-Means auf den Histogramm-Eintraegen ----
  * lock: Eintraege 0..lock-1 bleiben fest; ehb: Eintraege i+32 = halbe Helligkeit */
-static void kmeans(ULONG *c, LONG n, LONG lock, BOOL ehb, BOOL ocs, LONG iters)
+static void kmeans(ULONG *c, LONG n, LONG lock, BOOL ehb, BOOL ocs, LONG iters, LONG first)
 {
     double *sr = malloc(n * sizeof(double)), *sg = malloc(n * sizeof(double));
     double *sb = malloc(n * sizeof(double)), *sw = malloc(n * sizeof(double));
@@ -300,8 +300,8 @@ static void kmeans(ULONG *c, LONG n, LONG lock, BOOL ehb, BOOL ocs, LONG iters)
         for (k = 0; k < n; k++)
             sr[k] = sg[k] = sb[k] = sw[k] = 0;
         for (i = 0; i < npt; i++) {
-            LONG best = 0, bd = 0x7FFFFFFF;
-            for (k = 0; k < nc; k++) {
+            LONG best = first, bd = 0x7FFFFFFF;
+            for (k = first; k < nc; k++) {
                 LONG d = dist(pr[i], pg[i], pb[i], cr[k], cg[k], cb[k]);
                 if (d < bd) {
                     bd = d;
@@ -352,10 +352,11 @@ static UWORD *cache;            /* naechster Index + 1 je 6-Bit-Farbe */
 
 static LONG nearest(const QPalette *pal, LONG r, LONG g, LONG b, LONG n)
 {
-    LONG key = ((r >> 2) << 12) | ((g >> 2) << 6) | (b >> 2), k, best = 0, bd = 0x7FFFFFFF;
+    LONG key = ((r >> 2) << 12) | ((g >> 2) << 6) | (b >> 2), k, best, bd = 0x7FFFFFFF;
     if (cache && cache[key])
         return cache[key] - 1;
-    for (k = 0; k < n; k++) {
+    best = k = pal->transp && n > 1 ? 1 : 0;   /* Index 0 bleibt transparenten Pixeln */
+    for (; k < n; k++) {
         ULONG v = pal->col[k];
         LONG d = dist(r, g, b, (v >> 16) & 0xFF, (v >> 8) & 0xFF, v & 0xFF);
         if (d < bd) {
@@ -475,15 +476,49 @@ BOOL quant_palette(const ULONG *px, LONG n, const QuantOpts *o, QPalette *pal)
     return palette_core(px, n, o, pal);
 }
 
+/* EHB: Eintraege 32-63 als halbe Helligkeit von 0-31 */
+static void ehb_halves(QPalette *pal)
+{
+    LONG i;
+    for (i = 0; i < 32; i++) {
+        ULONG v = pal->col[i];
+        LONG r = (v >> 16) & 0xFF, g = (v >> 8) & 0xFF, b = v & 0xFF;
+        if (pal->ocs) {
+            r = ((r / 17) >> 1) * 17; g = ((g / 17) >> 1) * 17; b = ((b / 17) >> 1) * 17;
+        } else {
+            r >>= 1; g >>= 1; b >>= 1;
+        }
+        pal->col[32 + i] = ((ULONG)r << 16) | ((ULONG)g << 8) | (ULONG)b;
+    }
+}
+
 static BOOL palette_core(const ULONG *px, LONG n, const QuantOpts *o, QPalette *pal)
 {
     LONG k, i, lock = 0, want;
-    BOOL ocs = o->palmode == QP_OCS || o->mode == QM_HAM6;
+    BOOL ocs = o->palmode == QP_OCS || o->mode == QM_HAM6, transp = FALSE;
     memset(pal, 0, sizeof(*pal));
     pal->mode = o->mode;
     pal->ocs = ocs;
     want = o->mode == QM_EHB ? 32 : o->mode == QM_HAM6 ? 16 : o->mode == QM_HAM8 ? 64 :
            o->ncolors < 2 ? 2 : o->ncolors > 256 ? 256 : o->ncolors;
+    /* transparente Pixel (Brush): Index 0 frei halten, nicht bei HAM */
+    if (o->mode == QM_NORMAL || o->mode == QM_EHB)
+        for (i = 0; i < n && !transp; i++)
+            transp = (px[i] >> 24) < 128;
+    if (o->palmode == QP_FIXED && o->fixed && o->fixed->n > 0) {
+        const QPalette *f = o->fixed;
+        LONG m = o->mode == QM_NORMAL ? f->n : want;
+        for (i = 0; i < m; i++)
+            pal->col[i] = i < f->n ? f->col[i] : 0;
+        pal->ocs = f->ocs;
+        pal->n = m;
+        if (o->mode == QM_EHB) {
+            ehb_halves(pal);
+            pal->n = 64;
+        }
+        pal->transp = transp && pal->n > 1;
+        return TRUE;
+    }
     if (o->palmode == QP_GRAY && o->mode == QM_NORMAL) {
         for (i = 0; i < want; i++) {
             LONG v = i * 255 / (want - 1);
@@ -492,6 +527,7 @@ static BOOL palette_core(const ULONG *px, LONG n, const QuantOpts *o, QPalette *
             pal->col[i] = ((ULONG)v << 16) | ((ULONG)v << 8) | (ULONG)v;
         }
         pal->n = want;
+        pal->transp = transp;   /* Index 0 (Schwarz) wird transparent */
         return TRUE;
     }
     if (!build_hist(px, n)) {
@@ -501,7 +537,10 @@ static BOOL palette_core(const ULONG *px, LONG n, const QuantOpts *o, QPalette *
     if (o->palmode == QP_WORKBENCH && o->mode == QM_NORMAL) {
         lock = want < 8 ? want : 8;
         for (i = 0; i < lock; i++)
-            pal->col[i] = magicwb[i];
+            pal->col[i] = magicwb[i];   /* bei Transparenz: Grau 0 = Hintergrund */
+    } else if (transp && want > 1) {
+        pal->col[0] = 0;        /* transparent */
+        lock = 1;
     }
     k = lock + wu(want - lock, pal->col + lock);
     if (k < 1) {                /* leeres Bild */
@@ -516,21 +555,13 @@ static BOOL palette_core(const ULONG *px, LONG n, const QuantOpts *o, QPalette *
         while (k < 32)          /* EHB braucht 32 Grundfarben */
             pal->col[k++] = 0;
     if (o->optimize || o->mode == QM_EHB)
-        kmeans(pal->col, k, lock, o->mode == QM_EHB, ocs, o->mode == QM_EHB ? 16 : 10);
+        kmeans(pal->col, k, lock, o->mode == QM_EHB, ocs, o->mode == QM_EHB ? 16 : 10, transp && want > 1);
     if (o->mode == QM_EHB) {
-        for (i = 0; i < 32; i++) {
-            ULONG v = pal->col[i];
-            LONG r = (v >> 16) & 0xFF, g = (v >> 8) & 0xFF, b = v & 0xFF;
-            if (ocs) {
-                r = ((r / 17) >> 1) * 17; g = ((g / 17) >> 1) * 17; b = ((b / 17) >> 1) * 17;
-            } else {
-                r >>= 1; g >>= 1; b >>= 1;
-            }
-            pal->col[32 + i] = ((ULONG)r << 16) | ((ULONG)g << 8) | (ULONG)b;
-        }
+        ehb_halves(pal);
         k = 64;
     }
     pal->n = k;
+    pal->transp = transp && want > 1;
     free_wu();
     return TRUE;
 }

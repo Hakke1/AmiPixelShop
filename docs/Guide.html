@@ -248,7 +248,8 @@ together with the palette:</p>
 <p><img src="images/reduce.jpg" width="620" height="378" alt="Reduce Colors with a 32 color OCS palette"></p>
 <ul>
 <li><b>Palette</b>: <i>Adaptive</i> (24 bit colors, for AGA and RTG), <i>OCS 12-bit</i> (4 bit per channel, like OCS/ECS hardware),
-<i>MagicWB</i> (the 8 MagicWB colors stay, the rest is chosen for the image) or <i>Grayscale</i>.
+<i>MagicWB</i> (the 8 MagicWB colors stay, the rest is chosen for the image), <i>Grayscale</i>
+or <i>Fixed</i> (a given palette, see below).
 <li><b>Mode</b>: <i>Normal</i> with 2 to 256 colors, <i>EHB</i> (32 colors plus 32 half-bright ones - both halves are optimized together),
 <i>HAM6</i> and <i>HAM8</i> (each pixel picks the best of a palette color or changing one channel of its left neighbour).
 <li><b>Dither</b>: <i>None</i>, <i>Floyd-Steinberg</i> (smoothest gradients), <i>Atkinson</i> (crisper, keeps more contrast)
@@ -259,6 +260,14 @@ or <i>Ordered</i> (regular 8&times;8 pattern, good for animations). <b>Amount</b
 with the palette of the last <i>Reduce Colors</i>, or reduced automatically to the color mode of the document.
 The screen mode (Lowres/Hires, Interlace, EHB, HAM) is stored in the file, so viewers and paint programs show it correctly.
 The palette and settings are also saved in <tt>.aps</tt> files.</p>
+<p><b>Fixed palettes</b> - for graphics that must fit an existing picture or game:
+<b>Filter &gt; Amiga &gt; Load Palette...</b> takes the palette of any IFF picture or palette file and opens
+<i>Reduce Colors</i> with <i>Palette: Fixed</i>, so you see at once how the image looks with these colors.
+<b>Use Current Palette as Fixed</b> keeps the palette of the last reduction for further images,
+<b>Save Palette...</b> writes it as an IFF palette file (as DPaint does). The fixed palette is saved in <tt>.aps</tt> files.</p>
+<p><b>Brushes</b>: transparent areas are kept. With transparency, color 0 is reserved for transparent pixels
+(the usual DPaint brush), the export stores it as transparent color. For HAM, or when a palette has no free entry,
+a mask plane is written instead. IFF brushes with a transparent color or a mask plane open with their transparency.</p>
 <p>IFF pictures from other programs open with their palette and mode: 1 to 8 bitplanes, EHB, HAM6, HAM8, 24 bit,
 mask plane and DPaint PBM. Opened, edited and exported again, the palette stays the same.</p>
 
@@ -273,7 +282,7 @@ adjustment layers (Levels, Hue/Saturation, Brightness/Contrast, Invert, Threshol
 Text and smart objects come in as pixels. Files too large for the memory open flattened.</td></tr>
 <tr><td><tt>.png</tt></td><td align="center">yes</td><td align="center">yes</td><td>With transparency.</td></tr>
 <tr><td><tt>.jpg</tt></td><td align="center">yes</td><td align="center">yes</td><td>Flattened, quality 90.</td></tr>
-<tr><td><tt>.iff</tt></td><td align="center">yes</td><td align="center">yes</td><td>IFF ILBM and PBM, 1-8 bitplanes, EHB, HAM6/HAM8, 24 bit. Export with palette and screen mode, see <a href="#amiga">Amiga colors and IFF</a>.</td></tr>
+<tr><td><tt>.iff</tt></td><td align="center">yes</td><td align="center">yes</td><td>IFF ILBM and PBM, 1-8 bitplanes, EHB, HAM6/HAM8, 24 bit, brushes with transparency. Export with palette and screen mode, see <a href="#amiga">Amiga colors and IFF</a>.</td></tr>
 <tr><td>other</td><td align="center">yes</td><td align="center">-</td><td>GIF, BMP and more via installed datatypes.</td></tr>
 </table>
 <p>From the Shell several pictures open at once: <tt>AmiPixelShop pic1.iff pic2.png pic3.psd</tt>.</p>

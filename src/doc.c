@@ -583,6 +583,7 @@ void doc_free(Doc *d)
     if (d->bstate) FreeVec(d->bstate);
     if (d->wpath) FreeVec(d->wpath);
     if (d->qpal) FreeVec(d->qpal);
+    if (d->fixpal) FreeVec(d->fixpal);
     FreeVec(d);
     if (doc == d)
         doc = NULL;

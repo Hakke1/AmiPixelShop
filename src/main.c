@@ -28,6 +28,7 @@
 #include <stdlib.h>
 #include <math.h>
 #include "apx.h"
+#include "quant.h"
 
 #define APS_VERSION "0.4"
 /* fuer "Version AmiPixelShop" in der Shell */
@@ -1065,6 +1066,7 @@ static BOOL discard_ok(void)
 }
 
 static const char *ask_ext = ".aps";    /* Vorschlag fuer neue Dateinamen */
+static const char *ask_title;           /* eigener Titel des Dateidialogs oder NULL */
 
 static BOOL ask_file(BOOL save, char *out, LONG outlen)
 {
@@ -1084,8 +1086,8 @@ static BOOL ask_file(BOOL save, char *out, LONG outlen)
     }
     fr = AllocAslRequestTags(ASL_FileRequest,
         ASLFR_Screen, (ULONG)scr,
-        ASLFR_TitleText, (ULONG)(!save ? "Open" : strcmp(ask_ext, ".aps") ? "Export as IFF ILBM" :
-                                 "Save As (.aps, .png, .jpg, .iff)"),
+        ASLFR_TitleText, (ULONG)(ask_title ? ask_title : !save ? "Open" :
+                                 strcmp(ask_ext, ".aps") ? "Export as IFF ILBM" : "Save As (.aps, .png, .jpg, .iff)"),
         ASLFR_DoSaveMode, savemode,
         ASLFR_RejectIcons, TRUE,
         ASLFR_InitialDrawer, (ULONG)last_drawer,
@@ -1696,6 +1698,70 @@ void do_command(LONG c)
             break;
         }
         /* fall through */
+    case CMD_PAL_LOAD: {
+        char err[80], msg[400];
+        QPalette *q = AllocVec(sizeof(QPalette), MEMF_ANY | MEMF_CLEAR);
+        BOOL ok;
+        if (!q)
+            break;
+        ask_title = "Load Palette (IFF picture or palette)";
+        ok = ask_file(FALSE, path, sizeof(path));
+        ask_title = NULL;
+        if (ok && !file_load_palette(path, q, err)) {
+            sprintf(msg, "Cannot load the palette from %s:\n%s", path, err);
+            request(msg, "OK");
+            ok = FALSE;
+        }
+        if (!ok) {
+            FreeVec(q);
+            break;
+        }
+        if (doc->fixpal)
+            FreeVec(doc->fixpal);
+        doc->fixpal = q;
+        doc->modified = TRUE;
+        ui_draw_tab();
+        filter_reduce_fixed();      /* gleich ansehen, wie das Bild damit aussieht */
+        after_edit();
+        break; }
+    case CMD_PAL_SAVE: {
+        char err[80], msg[400];
+        const void *q = doc->qpal ? doc->qpal : doc->fixpal;
+        BOOL ok;
+        if (!q) {
+            request("This image has no palette yet.\nUse Filter > Amiga > Reduce Colors first.", "OK");
+            break;
+        }
+        ask_ext = ".pal";
+        ask_title = "Save Palette (IFF)";
+        ok = ask_file(TRUE, path, sizeof(path));
+        ask_ext = ".aps";
+        ask_title = NULL;
+        if (!ok)
+            break;
+        if (!strchr(FilePart(path), '.'))
+            strncat(path, ".pal", sizeof(path) - strlen(path) - 1);
+        if (!file_save_palette(path, q, err)) {
+            sprintf(msg, "Cannot save %s:\n%s", path, err);
+            request(msg, "OK");
+        } else
+            status_message("Palette saved");
+        break; }
+    case CMD_PAL_FIX:
+        if (!doc->qpal) {
+            request("This image has no palette yet.\nUse Filter > Amiga > Reduce Colors first.", "OK");
+            break;
+        }
+        if (!doc->fixpal && !(doc->fixpal = AllocVec(sizeof(QPalette), MEMF_ANY)))
+            break;
+        *(QPalette *)doc->fixpal = *(QPalette *)doc->qpal;
+        ((QPalette *)doc->fixpal)->mode = QM_NORMAL;
+        if (((QPalette *)doc->fixpal)->n > 32 && ((QPalette *)doc->qpal)->mode == QM_EHB)
+            ((QPalette *)doc->fixpal)->n = 32;
+        doc->modified = TRUE;
+        ui_draw_tab();
+        status_message("Palette fixed - Reduce Colors > Palette: Fixed uses it");
+        break;
     case CMD_EXPORT_IFF: {
         char err[80], msg[400];
         BOOL ok;

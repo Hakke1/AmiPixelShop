@@ -994,6 +994,7 @@ static void run_edges(ULONG *p, LONG w, LONG h, const LONG *v, LONG ox, LONG oy)
 
 static QPalette q_last;
 static LONG q_shown;            /* Anzahl in der Anzeige */
+static BOOL q_force_fixed;      /* naechster Dialog: Palette "Fixed" */
 
 static void opts_from(const LONG *v, QuantOpts *o)
 {
@@ -1003,6 +1004,13 @@ static void opts_from(const LONG *v, QuantOpts *o)
     o->dither = v[3];
     o->amount = v[4];
     o->optimize = v[5];
+    o->fixed = NULL;
+    if (o->palmode == QP_FIXED) {
+        /* vorgegebene Palette, sonst die aktuelle des Dokuments */
+        o->fixed = doc->fixpal ? doc->fixpal : doc->qpal;
+        if (!o->fixed)
+            o->palmode = QP_ADAPTIVE;
+    }
 }
 
 static void run_quant(ULONG *p, LONG w, LONG h, const LONG *v, LONG ox, LONG oy)
@@ -1021,7 +1029,7 @@ static BOOL quant_dialog(void (*prev)(void))
 {
     LONG *v = cur->val;
     DlgSlider ds[7] = {
-        { "Palette:", 0, DLG_CHOICE, DLG_CHOICE, "Adaptive|OCS 12-bit|MagicWB|Grayscale", 1 },
+        { "Palette:", 0, DLG_CHOICE, DLG_CHOICE, "Adaptive|OCS 12-bit|MagicWB|Grayscale|Fixed", 1 },
         { "Mode:", 0, DLG_CHOICE, DLG_CHOICE, "Normal|EHB|HAM6|HAM8", 1 },
         { "Colors:", 0, 2, 256, "", 1 },
         { "Dither:", 0, DLG_CHOICE, DLG_CHOICE, "None|Floyd-Steinberg|Atkinson|Ordered", 1 },
@@ -1040,6 +1048,11 @@ static BOOL quant_dialog(void (*prev)(void))
         if (doc->colors > 0)
             v[2] = doc->colors;
         v[0] = doc->colors > 0 && doc->colors <= 32 ? QP_OCS : QP_ADAPTIVE;
+    }
+    if (q_force_fixed) {
+        v[0] = QP_FIXED;
+        v[1] = QM_NORMAL;
+        q_force_fixed = FALSE;
     }
     for (i = 0; i < 6; i++)
         ds[i].val = &v[i];
@@ -1061,6 +1074,14 @@ static void quant_store(void)
         doc->qopt[i] = cur->val[i];
     doc->colors = q_last.mode == QM_HAM6 ? -6 : q_last.mode == QM_HAM8 ? -8 :
                   q_last.mode == QM_EHB ? 64 : q_last.n;
+}
+
+/* Reduce Colors mit der eben geladenen Palette oeffnen */
+void filter_reduce_fixed(void)
+{
+    q_force_fixed = TRUE;
+    filter_command(CMD_FLT_QUANT);
+    q_force_fixed = FALSE;
 }
 
 /* ---- Tabelle aller Korrekturen und Filter ---- */

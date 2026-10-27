@@ -154,6 +154,7 @@ typedef struct Doc {
     LONG colors;                /* Zielfarbtiefe: 0 = RGB, sonst Farben; -6/-8 = HAM6/HAM8 */
     LONG ppi;                   /* Aufloesung (nur Angabe) */
     void *qpal;                 /* QPalette der letzten Farbreduktion (fuer IFF) oder NULL */
+    void *fixpal;               /* vorgegebene Palette (Reduce Colors: Fixed) oder NULL */
     LONG qopt[6];               /* deren Einstellungen (QuantOpts) */
     struct Doc *size_prev;      /* Zustand vor Bildgroesse/Arbeitsflaeche/Freistellen (Undo) */
     struct Doc *size_next;      /* ... und danach (Redo) */
@@ -624,6 +625,9 @@ void ui_rename_layer(void);
 Doc *file_load(const char *path, char *err);
 Doc *load_psd(const char *path, char *err);
 BOOL file_export_iff(Doc *d, const char *path, char *err);
+BOOL file_load_palette(const char *path, void *qpal, char *err);
+BOOL file_save_palette(const char *path, const void *qpal, char *err);
+void filter_reduce_fixed(void);
 BOOL file_save(Doc *d, const char *path, char *err);
 ULONG *dt_read_argb(APTR name, ULONG srctype, LONG *w, LONG *h, char *err);
 Doc *doc_from_argb_pub(LONG w, LONG h, const ULONG *src);
@@ -655,6 +659,7 @@ enum {
     CMD_PATH_SEL, CMD_PATH_FILL, CMD_PATH_STROKE, CMD_PATH_DEL,
     CMD_TF_FREE, CMD_TF_DISTORT, CMD_TF_PERSP, CMD_TF_WARP,
     CMD_FLT_LIQUIFY, CMD_LQ_APPLY, CMD_LQ_CANCEL, CMD_EXPORT_IFF,
+    CMD_PAL_LOAD, CMD_PAL_SAVE, CMD_PAL_FIX,
     CMD_GROUP_NEW, CMD_GROUP, CMD_UNGROUP, CMD_MERGE_GROUP, CMD_ADJ_EDIT,
     CMD_NADJ_BRICON, CMD_NADJ_LEVELS, CMD_NADJ_CURVES, CMD_NADJ_HUESAT, CMD_NADJ_DESAT,
     CMD_NADJ_INVERT, CMD_NADJ_THRESH, CMD_NADJ_POSTER, CMD_FLIP_H, CMD_FLIP_V, CMD_ROT180, CMD_ROT90CW, CMD_ROT90CCW,

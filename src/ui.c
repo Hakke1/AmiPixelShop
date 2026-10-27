@@ -137,7 +137,9 @@ static const MenuItem m_fpix[] = { { "Mosaic...", "", CMD_FLT_MOSAIC }, END };
 static const MenuItem m_fstyl[] = {
     { "Emboss...", "", CMD_FLT_EMBOSS }, { "Find Edges", "", CMD_FLT_EDGES }, END };
 static const MenuItem m_fother[] = { { "High Pass...", "", CMD_FLT_HIGHPASS }, END };
-static const MenuItem m_famiga[] = { { "Reduce Colors...", "", CMD_FLT_QUANT }, END };
+static const MenuItem m_famiga[] = { { "Reduce Colors...", "", CMD_FLT_QUANT }, SEP,
+    { "Load Palette...", "", CMD_PAL_LOAD }, { "Save Palette...", "", CMD_PAL_SAVE },
+    { "Use Current Palette as Fixed", "", CMD_PAL_FIX }, END };
 static const MenuItem m_filter[] = {
     { "Last Filter", "Ctrl+F", CMD_FLT_LAST }, SEP,
     { "Liquify...", "Shift+Ctrl+X", CMD_FLT_LIQUIFY }, SEP,

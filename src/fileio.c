@@ -51,6 +51,7 @@ struct Library *DataTypesBase;
 #define TAG_PATH 0x50415448 /* "PATH": nach der letzten Ebene, Arbeitspfad */
 #define TAG_AMIG 0x414D4947 /* "AMIG": Farbtiefe und Aufloesung des Dokuments */
 #define TAG_QPAL 0x5150414C /* "QPAL": Palette der letzten Farbreduktion */
+#define TAG_FPAL 0x4650414C /* "FPAL": vorgegebene Palette (Fixed) */
 
 /* Kachel -> 4 Kanalebenen mit Differenzfilter */
 static void tile_encode(const ULONG *px, UBYTE *out)
@@ -538,7 +539,7 @@ static Doc *load_aps(const char *path, char *err)
                     }
                 } else if (Seek(fh, len - 8, OFFSET_CURRENT) < 0)
                     break;
-            } else if (tag == TAG_QPAL && len >= 36 && len <= 36 + 256 * 4) {
+            } else if ((tag == TAG_QPAL || tag == TAG_FPAL) && len >= 36 && len <= 36 + 256 * 4) {
                 QPalette *q = AllocVec(sizeof(QPalette), MEMF_ANY | MEMF_CLEAR);
                 ULONG h[9];
                 BOOL ok = q && rd(fh, h, 36) && h[6] == (len - 36) / 4 && h[6] >= 1 &&
@@ -547,14 +548,21 @@ static Doc *load_aps(const char *path, char *err)
                     if (q) FreeVec(q);
                     break;
                 }
-                for (i = 0; i < 6; i++)
-                    d->qopt[i] = (LONG)h[i];
                 q->n = (LONG)h[6];
                 q->mode = (LONG)h[7];
-                q->ocs = h[8] != 0;
-                if (d->qpal)
-                    FreeVec(d->qpal);
-                d->qpal = q;
+                q->ocs = (h[8] & 1) != 0;
+                q->transp = (h[8] & 2) != 0;
+                if (tag == TAG_FPAL) {
+                    if (d->fixpal)
+                        FreeVec(d->fixpal);
+                    d->fixpal = q;
+                } else {
+                    for (i = 0; i < 6; i++)
+                        d->qopt[i] = (LONG)h[i];
+                    if (d->qpal)
+                        FreeVec(d->qpal);
+                    d->qpal = q;
+                }
             } else if (Seek(fh, len, OFFSET_CURRENT) < 0)
                 break;              /* unbekannter Block: ueberspringen */
         }
@@ -568,6 +576,18 @@ fail:
     if (d) doc_free(d);
     Close(fh);
     return NULL;
+}
+
+static BOOL wr_qpal(BPTR fh, ULONG tag, const QPalette *q, const LONG *opt)
+{
+    LONG i;
+    if (!wr32(fh, tag) || !wr32(fh, 36 + q->n * 4))
+        return FALSE;
+    for (i = 0; i < 6; i++)
+        if (!wr32(fh, opt ? opt[i] : 0))
+            return FALSE;
+    return wr32(fh, q->n) && wr32(fh, q->mode) && wr32(fh, (q->ocs ? 1 : 0) | (q->transp ? 2 : 0)) &&
+           wr(fh, q->col, q->n * 4);
 }
 
 static BOOL save_aps(Doc *d, const char *path, char *err)
@@ -643,17 +663,10 @@ static BOOL save_aps(Doc *d, const char *path, char *err)
         if (!wr(fh, p->pt, p->npts * sizeof(PathPt)))
             goto out;
     }
-    /* Palette der letzten Farbreduktion (nach PATH: 0.3 liest dahinter nichts mehr) */
-    if (d->qpal) {
-        QPalette *q = d->qpal;
-        if (!wr32(fh, TAG_QPAL) || !wr32(fh, 36 + q->n * 4))
-            goto out;
-        for (i = 0; i < 6; i++)
-            if (!wr32(fh, d->qopt[i]))
-                goto out;
-        if (!wr32(fh, q->n) || !wr32(fh, q->mode) || !wr32(fh, q->ocs) || !wr(fh, q->col, q->n * 4))
-            goto out;
-    }
+    /* Paletten (nach PATH: 0.3 liest dahinter nichts mehr) */
+    if ((d->qpal && !wr_qpal(fh, TAG_QPAL, d->qpal, d->qopt)) ||
+        (d->fixpal && !wr_qpal(fh, TAG_FPAL, d->fixpal, NULL)))
+        goto out;
     ok = TRUE;
 out:
     if (present)
@@ -793,7 +806,8 @@ BOOL file_export_iff(Doc *d, const char *path, char *err)
     ULONG *px = NULL, camg = 0;
     QuantOpts o;
     QPalette pal;
-    LONG w = d->w, h = d->h, i, x, y, p, planes, rb, ncmap, bodylen = 0, bodycap;
+    LONG w = d->w, h = d->h, i, x, y, p, planes, rb, ncmap, bodylen = 0, bodycap, masking;
+    BOOL anytr = FALSE;
     BPTR fh = 0;
     BOOL ok = FALSE;
     doc_process_dirty();
@@ -831,7 +845,11 @@ BOOL file_export_iff(Doc *d, const char *path, char *err)
     planes = quant_planes(&pal);
     rb = ((w + 15) >> 4) << 1;
     ncmap = pal.mode == QM_EHB ? 32 : pal.n;
-    bodycap = h * planes * (rb + rb / 128 + 2);
+    /* Transparenz: freie Farbe 0 (DPaint-Brush), sonst Maskenebene */
+    for (i = 0; i < w * h && !anytr; i++)
+        anytr = (px[i] >> 24) == 0;
+    masking = !anytr ? 0 : pal.transp ? 2 : 1;
+    bodycap = h * (planes + 1) * (rb + rb / 128 + 2);
     plane = AllocVec(rb, MEMF_ANY);
     packed = AllocVec(bodycap, MEMF_ANY);
     if (!plane || !packed) {
@@ -847,6 +865,14 @@ BOOL file_export_iff(Doc *d, const char *path, char *err)
                 if ((ir[x] >> p) & 1)
                     plane[x >> 3] |= 0x80 >> (x & 7);
             bodylen += pack_row(plane, rb, packed + bodylen);
+            if (p == planes - 1 && masking == 1) {
+                const ULONG *pr = px + y * w;
+                memset(plane, 0, rb);
+                for (x = 0; x < w; x++)
+                    if (pr[x] >> 24)
+                        plane[x >> 3] |= 0x80 >> (x & 7);
+                bodylen += pack_row(plane, rb, packed + bodylen);
+            }
         }
     if (pal.mode == QM_HAM6 || pal.mode == QM_HAM8)
         camg |= 0x800;
@@ -869,11 +895,18 @@ BOOL file_export_iff(Doc *d, const char *path, char *err)
         UBYTE xa = w > 800 ? 5 : w > 400 ? 10 : 20, ya = h > 300 ? 11 : 22;
         bmhd[0] = w >> 8; bmhd[1] = w; bmhd[2] = h >> 8; bmhd[3] = h;
         bmhd[4] = bmhd[5] = bmhd[6] = bmhd[7] = 0;         /* x, y */
-        bmhd[8] = planes; bmhd[9] = 0;                     /* keine Maske */
+        /* Seite: mindestens der passende Bildschirm; kleiner als die Seite = Brush */
+        LONG pw = w, ph = h;
+        if (anytr) {
+            LONG sw = w > 640 ? 1280 : w > 320 ? 640 : 320, sh = h > 256 ? 512 : 256;
+            if (pw < sw) pw = sw;
+            if (ph < sh) ph = sh;
+        }
+        bmhd[8] = planes; bmhd[9] = masking;               /* 0 keine, 1 Maskenebene, 2 transparente Farbe */
         bmhd[10] = 1; bmhd[11] = 0;                        /* ByteRun1 */
         bmhd[12] = bmhd[13] = 0;                           /* transparente Farbe 0 */
         bmhd[14] = xa; bmhd[15] = ya;
-        bmhd[16] = w >> 8; bmhd[17] = w; bmhd[18] = h >> 8; bmhd[19] = h;
+        bmhd[16] = pw >> 8; bmhd[17] = pw; bmhd[18] = ph >> 8; bmhd[19] = ph;
         ok = wr32(fh, 0x464F524D) && wr32(fh, formlen) && wr32(fh, 0x494C424D) &&
              wr32(fh, 0x424D4844) && wr32(fh, 20) && wr(fh, bmhd, 20) &&
              wr32(fh, 0x434D4150) && wr32(fh, cmaplen);
@@ -946,7 +979,8 @@ static Doc *load_iff(const char *path, char *err)
     UBYTE hd[12], *buf = NULL, *bmhd = NULL, *cmap = NULL, *body = NULL, *row = NULL;
     ULONG *px = NULL, col[256], camg = 0;
     LONG size, cmaplen = 0, bodylen = 0, w, h, planes, mask, comp, rb, nplanes, ncol, i, x, y, p;
-    BOOL ham, ehb, ocs = TRUE, pbm;
+    BOOL ham, ehb, ocs = TRUE, pbm, tmask;
+    LONG tcol, pagew, pageh;
     Doc *d = NULL;
     if (!fh)
         return NULL;
@@ -984,6 +1018,9 @@ static Doc *load_iff(const char *path, char *err)
     planes = bmhd[8];
     mask = bmhd[9];
     comp = bmhd[10];
+    tcol = (bmhd[12] << 8) | bmhd[13];
+    pagew = (bmhd[16] << 8) | bmhd[17];
+    pageh = (bmhd[18] << 8) | bmhd[19];
     if (w < 1 || h < 1 || w > 8192 || h > 8192 || comp > 1 || !((planes >= 1 && planes <= 8) || planes == 24) ||
         (pbm && planes != 8)) {
         strcpy(err, "Unsupported IFF picture");
@@ -993,6 +1030,9 @@ static Doc *load_iff(const char *path, char *err)
         camg = 0;               /* RTG-Modus-ID: HAM/EHB-Bits sind dort keine Flags */
     ham = !pbm && (camg & 0x800) && (planes == 6 || planes == 8);
     ehb = !ham && (camg & 0x80) && planes == 6;
+    /* transparente Farbe nur bei Brushes (kleiner als die Seite): ganze Bilder
+     * tragen sie oft nur nebenbei (Farbe 0 = Hintergrund) */
+    tmask = mask == 2 && !ham && planes <= 8 && tcol < (1 << planes) && (w < pagew || h < pageh);
     /* Palette; alte 4-Bit-Werte (0xX0) auf 8 Bit strecken */
     ncol = cmaplen / 3 > 256 ? 256 : cmaplen / 3;
     {
@@ -1050,7 +1090,7 @@ static Doc *load_iff(const char *path, char *err)
             }
             if (pbm) {
                 for (x = 0; x < w; x++)
-                    o[x] = 0xFF000000 | col[row[x]];
+                    o[x] = tmask && row[x] == tcol ? 0 : 0xFF000000 | col[row[x]];
                 continue;
             }
             pr = (col[0] >> 16) & 0xFF; pg = (col[0] >> 8) & 0xFF; pb = col[0] & 0xFF;
@@ -1089,7 +1129,7 @@ static Doc *load_iff(const char *path, char *err)
                     }
                     o[x] = a | ((ULONG)pr << 16) | ((ULONG)pg << 8) | (ULONG)pb;
                 } else
-                    o[x] = a | col[v];
+                    o[x] = tmask && v == (ULONG)tcol ? 0 : a | col[v];
             }
         }
     }
@@ -1107,6 +1147,13 @@ static Doc *load_iff(const char *path, char *err)
             q->n = n;
             q->mode = ham ? (planes == 6 ? QM_HAM6 : QM_HAM8) : ehb ? QM_EHB : QM_NORMAL;
             q->ocs = ocs;
+            /* Brush: transparente Farbe kommt auf Index 0 (beim EHB geht das nicht) */
+            if (tmask && (tcol == 0 || !ehb)) {
+                ULONG t = q->col[0];
+                q->col[0] = q->col[tcol];
+                q->col[tcol] = t;
+                q->transp = TRUE;
+            }
             d->qpal = q;
             d->qopt[0] = ocs ? QP_OCS : QP_ADAPTIVE;
             d->qopt[1] = q->mode;
@@ -1121,6 +1168,123 @@ out:
     if (row) FreeVec(row);
     if (px) FreeVec(px);
     return d;
+}
+
+/* Palette aus einer IFF-Datei (CMAP; ILBM, PBM oder reine Palettendatei) */
+BOOL file_load_palette(const char *path, void *qpal, char *err)
+{
+    QPalette *q = qpal;
+    BPTR fh = Open(path, MODE_OLDFILE);
+    UBYTE hd[12], c[8];
+    ULONG camg = 0;
+    LONG i, n = 0, planes = 0;
+    BOOL low0 = TRUE, ocs = TRUE, ok = FALSE;
+    if (!fh) {
+        strcpy(err, "Cannot open the file");
+        return FALSE;
+    }
+    memset(q, 0, sizeof(*q));
+    if (Read(fh, hd, 12) != 12 || be32(hd) != 0x464F524D ||
+        (be32(hd + 8) != 0x494C424D && be32(hd + 8) != 0x50424D20)) {
+        strcpy(err, "Not an IFF picture or palette");
+        goto out;
+    }
+    while (Read(fh, c, 8) == 8) {
+        ULONG id = be32(c), len = be32(c + 4);
+        if (id == 0x434D4150 && !n) {
+            UBYTE rgb[3];
+            for (i = 0; i < (LONG)(len / 3) && i < 256; i++) {
+                if (Read(fh, rgb, 3) != 3)
+                    goto out;
+                q->col[i] = ((ULONG)rgb[0] << 16) | ((ULONG)rgb[1] << 8) | rgb[2];
+                if ((rgb[0] | rgb[1] | rgb[2]) & 0x0F)
+                    low0 = FALSE;
+            }
+            n = i;
+            len -= i * 3;
+        } else if (id == 0x43414D47 && len >= 4) {
+            if (Read(fh, c, 4) != 4)
+                goto out;
+            camg = be32(c);
+            len -= 4;
+        } else if (id == 0x424D4844 && len >= 20) {
+            UBYTE b[20];
+            if (Read(fh, b, 20) != 20)
+                goto out;
+            planes = b[8];
+            len -= 20;
+        } else if (id == 0x424F4459)
+            break;
+        if (Seek(fh, len + (len & 1), OFFSET_CURRENT) < 0)
+            break;
+    }
+    if (!n) {
+        strcpy(err, "The file has no palette (CMAP)");
+        goto out;
+    }
+    for (i = 0; i < n; i++) {
+        ULONG v = q->col[i];
+        if (low0 && n <= 64)
+            v |= (v >> 4) & 0x0F0F0F;       /* alte 4-Bit-Werte */
+        if (((v >> 16) & 0xFF) % 17 || ((v >> 8) & 0xFF) % 17 || (v & 0xFF) % 17)
+            ocs = FALSE;
+        q->col[i] = v;
+    }
+    if (camg & 0xFFF00000)
+        camg = 0;
+    /* HAM: nur die Basispalette; EHB: die 32 Grundfarben */
+    if ((camg & 0x800) && (planes == 6 || planes == 8) && n > (planes == 6 ? 16 : 64))
+        n = planes == 6 ? 16 : 64;
+    else if ((camg & 0x80) && planes == 6 && n > 32)
+        n = 32;
+    q->n = n;
+    q->mode = QM_NORMAL;
+    q->ocs = ocs;
+    ok = TRUE;
+out:
+    Close(fh);
+    return ok;
+}
+
+/* Palette als IFF ILBM ohne Bilddaten (wie DPaint-Palettendateien) */
+BOOL file_save_palette(const char *path, const void *qpal, char *err)
+{
+    const QPalette *q = qpal;
+    BPTR fh = Open(path, MODE_NEWFILE);
+    UBYTE bmhd[20], pad = 0;
+    LONG i, n = q->mode == QM_EHB ? 32 : q->n, planes = 1, cl = n * 3;
+    BOOL ok;
+    if (!fh) {
+        strcpy(err, "Cannot create the file");
+        return FALSE;
+    }
+    while ((1 << planes) < n)
+        planes++;
+    if (q->mode == QM_EHB || q->mode == QM_HAM6)
+        planes = 6;
+    else if (q->mode == QM_HAM8)
+        planes = 8;
+    memset(bmhd, 0, sizeof(bmhd));
+    bmhd[8] = planes;
+    bmhd[14] = 10; bmhd[15] = 11;
+    bmhd[16] = 320 >> 8; bmhd[17] = 320 & 0xFF; bmhd[19] = 256 & 0xFF; bmhd[18] = 256 >> 8;
+    ok = wr32(fh, 0x464F524D) && wr32(fh, 4 + 28 + 8 + cl + (cl & 1) + 12) && wr32(fh, 0x494C424D) &&
+         wr32(fh, 0x424D4844) && wr32(fh, 20) && wr(fh, bmhd, 20) && wr32(fh, 0x434D4150) && wr32(fh, cl);
+    for (i = 0; ok && i < n; i++) {
+        UBYTE c[3];
+        c[0] = q->col[i] >> 16; c[1] = q->col[i] >> 8; c[2] = q->col[i];
+        ok = wr(fh, c, 3);
+    }
+    if (ok && (cl & 1))
+        ok = wr(fh, &pad, 1);
+    ok = ok && wr32(fh, 0x43414D47) && wr32(fh, 4) &&
+         wr32(fh, q->mode == QM_EHB ? 0x80 : q->mode == QM_HAM6 || q->mode == QM_HAM8 ? 0x800 : 0);
+    Close(fh);
+    if (!ok) {
+        strcpy(err, "Write error (disk full?)");
+        DeleteFile(path);
+    }
+    return ok;
 }
 
 Doc *file_load(const char *path, char *err)
