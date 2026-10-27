@@ -92,7 +92,7 @@ typedef struct APLayer {
     UBYTE visible;
     UBYTE mode;                 /* BM_* */
     UBYTE mask_on;              /* Maske aktiv */
-    Tile **mask;                /* Ebenenmaske: tw*th graue Kacheln (immer belegt) oder NULL */
+    Tile **mask;                /* Ebenenmaske: tw*th graue Kacheln (NULL-Kachel = weiss) oder NULL */
     TextInfo *text;             /* Textebene oder NULL */
     char name[32];
     LayerFx *fx;                /* Ebenenstil oder NULL */

@@ -76,8 +76,7 @@ Delete these files to reset all settings.</p>
 <h2>4. First start and screen mode</h2>
 <p>On the first start a screen mode requester appears. Choose an RTG mode with 24 or 32 bit
 (only suitable modes from 1024&times;600 to 1920&times;1080 are listed). AmiPixelShop opens its own screen
-for maximum speed. The choice is saved; change it later with <b>Edit &gt; Screen Mode...</b>
-(takes effect on the next start).</p>
+for maximum speed. The choice is saved; change it any time with <b>Edit &gt; Screen Mode...</b> - the new mode is used immediately.</p>
 
 <hr>
 <a name="ui"></a>
@@ -98,7 +97,7 @@ With <b>Edit &gt; Toolbar...</b> you choose which tools are shown.</p>
 <p><b>Document tabs</b> - several images can be open at once. <tt>Ctrl+Tab</tt> switches.</p>
 <p><b>Panels</b> (right) - Color/Swatches, <a href="#props">Properties</a> and Layers/History.</p>
 <p><b>Status bar</b> (bottom) - zoom, document size, redraw time and messages.</p>
-<p><b>Navigation</b>: hold <tt>Space</tt> and drag to scroll, mouse wheel or <tt>Ctrl++</tt> / <tt>Ctrl+-</tt> to zoom,
+<p><b>Navigation</b>: hold <tt>Space</tt> and drag to scroll, click the zoom field in the status bar to type a zoom value, mouse wheel or <tt>Ctrl++</tt> / <tt>Ctrl+-</tt> to zoom,
 <tt>Ctrl+0</tt> fits the image, <tt>Ctrl+1</tt> shows 100%.</p>
 </td>
 </tr>
@@ -186,7 +185,7 @@ non-destructive Brightness/Contrast, Levels, Curves, Hue/Saturation, Desaturate,
 <hr>
 <a name="type"></a>
 <h2>10. Type</h2>
-<p>Choose the Type tool, click into the image and type. Return starts a new line,
+<p>Choose the Type tool, click into the image and type - or drag a box for <b>paragraph text</b> that wraps automatically. Return starts a new line,
 <b>Ctrl+Return</b> or the <i>Commit</i> button finishes, <b>Esc</b> cancels.
 Click an existing text with the Type tool to edit it again.</p>
 <p>Options bar and <b>Type</b> menu: font, size, alignment (left / center / right),
@@ -232,8 +231,9 @@ While transforming, the options bar switches between <b>Free</b>, <b>Distort</b>
 <table border="1" cellpadding="4" cellspacing="0" bordercolor="#444444">
 <tr bgcolor="#1e1e1e"><th align="left">Format</th><th>Open</th><th>Save</th><th align="left">Notes</th></tr>
 <tr><td><tt>.aps</tt></td><td align="center">yes</td><td align="center">yes</td><td>Native format: keeps layers, groups, masks, styles, adjustment layers and editable text.</td></tr>
-<tr><td><tt>.psd</tt></td><td align="center">yes</td><td align="center">-</td><td>Layered files (RGB or grayscale, 8 bit): layers, groups, masks, clipping masks, blend modes, opacity.
-Text and smart objects come in as pixels, layer effects are not imported. Files too large for the memory open flattened.</td></tr>
+<tr><td><tt>.psd</tt></td><td align="center">yes</td><td align="center">-</td><td>Layered files (RGB or grayscale, 8 bit, all compressions): layers, groups, masks, clipping masks, blend modes, opacity,
+adjustment layers (Levels, Hue/Saturation, Brightness/Contrast, Invert, Threshold, Posterize), drop shadow and outer glow.
+Text and smart objects come in as pixels. Files too large for the memory open flattened.</td></tr>
 <tr><td><tt>.png</tt></td><td align="center">yes</td><td align="center">yes</td><td>With transparency.</td></tr>
 <tr><td><tt>.jpg</tt></td><td align="center">yes</td><td align="center">yes</td><td>Flattened, quality 90.</td></tr>
 <tr><td>other</td><td align="center">yes</td><td align="center">-</td><td>IFF ILBM, GIF, BMP and more via installed datatypes.</td></tr>

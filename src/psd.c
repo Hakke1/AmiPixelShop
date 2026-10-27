@@ -5,8 +5,11 @@
  * Uebernommen werden Ebenen mit Name (Unicode), Deckkraft, Fill, Sichtbarkeit,
  * Fuellmethode, Schnittmaske, Ebenenmaske und Gruppen (auch Pass Through).
  * Pixel ausserhalb der Flaeche landen im Ueberhang der Ebene.
- * Text- und Smart-Objekt-Ebenen kommen als Pixel; Korrekturebenen werden als
- * ausgeblendete leere Ebene angelegt. Ohne Ebenenteil (oder bei anderen
+ * Text- und Smart-Objekt-Ebenen kommen als Pixel. Korrekturebenen Levels,
+ * Hue/Saturation, Brightness/Contrast, Invert, Threshold und Posterize werden
+ * uebernommen, andere als ausgeblendete leere Ebene angelegt. Einfache
+ * Ebenenstile (lrFX: Schlagschatten, Schein nach aussen) kommen mit.
+ * Kanaele: RAW, RLE, ZIP (mit und ohne Vorhersage). Ohne Ebenenteil (oder bei anderen
  * Formaten) liefert load_psd NULL mit leerem err: dann laedt stb_image das
  * zusammengesetzte Bild.
  * Die Datei wird gepuffert gelesen (nicht ganz in den Speicher: PSDs werden
@@ -19,7 +22,10 @@
 #include <proto/dos.h>
 #include <string.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include "apx.h"
+
+extern char *stbi_zlib_decode_malloc_guesssize(const char *buffer, int len, int initial_size, int *outlen);
 
 #define RD_BUF 65536
 
@@ -113,13 +119,41 @@ static UBYTE blend_mode(ULONG key)
     return BM_NORMAL;
 }
 
-/* ein Kanal (w x h) nach out (Abstand step Bytes); row: Puffer >= 2*w+16 */
-static BOOL read_channel(Rd *r, LONG w, LONG h, UBYTE *out, LONG step, UBYTE *row)
+/* ein Kanal (w x h) nach out (Abstand step Bytes); row: Puffer >= 2*w+16;
+ * clen: Laenge der Kanaldaten samt Kompressionskennung */
+static BOOL read_channel(Rd *r, LONG w, LONG h, UBYTE *out, LONG step, UBYTE *row, ULONG clen)
 {
     ULONG comp = u16(r);
     LONG y, x;
     if (w <= 0 || h <= 0)
         return !r->bad;
+    if (comp == 2 || comp == 3) {
+        /* ZIP (zlib), 3 = mit Vorhersage: jedes Byte als Differenz zum linken */
+        char *src, *raw;
+        int rawlen = 0;
+        if (clen < 3 || !(src = AllocVec(clen - 2, MEMF_ANY)))
+            return FALSE;
+        if (!rd_bytes(r, (UBYTE *)src, clen - 2)) {
+            FreeVec(src);
+            return FALSE;
+        }
+        raw = stbi_zlib_decode_malloc_guesssize(src, clen - 2, w * h, &rawlen);
+        FreeVec(src);
+        if (!raw || rawlen < w * h) {
+            if (raw) free(raw);
+            return FALSE;
+        }
+        for (y = 0; y < h; y++) {
+            UBYTE *ln = (UBYTE *)raw + y * w, *o = out + y * w * step;
+            if (comp == 3)
+                for (x = 1; x < w; x++)
+                    ln[x] += ln[x - 1];
+            for (x = 0; x < w; x++)
+                o[x * step] = ln[x];
+        }
+        free(raw);
+        return TRUE;
+    }
     if (comp == 0) {
         for (y = 0; y < h; y++) {
             UBYTE *o = out + y * w * step;
@@ -199,7 +233,86 @@ typedef struct {
     UBYTE mdef, mflags;
     BOOL hasmask;
     char name[32];
+    LONG adj_cmd;               /* uebernommene Korrektur (CMD_ADJ_*) oder 0 */
+    LONG adj_v[6];
+    LayerFx fx;
+    BOOL has_fx;
 } Rec;
+
+/* Farbe aus 2 Byte Farbraum + 4 x 2 Byte (16 Bit je Kanal) */
+static ULONG rd_color(Rd *r)
+{
+    ULONG c0, c1, c2;
+    u16(r);
+    c0 = u16(r) >> 8;
+    c1 = u16(r) >> 8;
+    c2 = u16(r) >> 8;
+    u16(r);
+    return (c0 << 16) | (c1 << 8) | c2;
+}
+
+/* Prozent: aeltere Dateien 0..100, manche 0..255 */
+static LONG pct(ULONG v)
+{
+    return v > 100 ? (LONG)(v * 100 / 255) : (LONG)v;
+}
+
+/* Wert in Pixeln: ganzzahlig oder 16.16-Festkomma */
+static LONG px16(ULONG v)
+{
+    return v > 0xFFFF ? (LONG)(v >> 16) : (LONG)v;
+}
+
+/* einfache Ebeneneffekte (lrFX): Schlagschatten und Schein nach aussen */
+static void read_lrfx(Rd *r, Rec *rc, LONG end)
+{
+    LONG n, i;
+    u16(r);                     /* Version */
+    n = u16(r);
+    for (i = 0; i < n && tell(r) + 12 <= end && !r->bad; i++) {
+        ULONG sig = u32(r), key = u32(r), size = u32(r);
+        LONG nx = tell(r) + size;
+        if (sig != K('8','B','I','M'))
+            break;
+        if (key == K('d','s','d','w') && size >= 41) {
+            LONG blur, angle, dist, on, op;
+            ULONG col;
+            u32(r);             /* Version */
+            blur = px16(u32(r));
+            u32(r);             /* Intensitaet */
+            angle = (LONG)u32(r);
+            dist = px16(u32(r));
+            col = rd_color(r);
+            u32(r); u32(r);     /* Fuellmethode */
+            on = u8(r);
+            u8(r);
+            op = pct(u8(r));
+            rc->fx.sh_on = on != 0;
+            rc->fx.sh_opacity = op;
+            rc->fx.sh_angle = angle;
+            rc->fx.sh_dist = dist;
+            rc->fx.sh_size = blur;
+            rc->fx.sh_color = col;
+            rc->has_fx |= on != 0;
+        } else if (key == K('o','g','l','w') && size >= 32) {
+            LONG blur, on, op;
+            ULONG col;
+            u32(r);
+            blur = px16(u32(r));
+            u32(r);             /* Intensitaet */
+            col = rd_color(r);
+            u32(r); u32(r);
+            on = u8(r);
+            op = pct(u8(r));
+            rc->fx.gl_on = on != 0;
+            rc->fx.gl_opacity = op;
+            rc->fx.gl_size = blur;
+            rc->fx.gl_color = col;
+            rc->has_fx |= on != 0;
+        }
+        seek_to(r, nx);
+    }
+}
 
 /* Pixel einer Ebene (Rechteck) auf Kacheln und Ueberhang verteilen */
 static const ULONG *pk_buf;
@@ -245,6 +358,8 @@ static BOOL put_mask(Doc *d, Layer *l, const UBYTE *m, Rec *rc)
         if (i == n)
             return TRUE;
     }
+    if (l->mask)                /* Korrekturebene: leere Tabelle schon angelegt */
+        FreeVec(l->mask);
     if (!(l->mask = AllocVec(d->tw * d->th * sizeof(Tile *), MEMF_ANY | MEMF_CLEAR)))
         return FALSE;
     for (i = 0; i < d->tw * d->th; i++)
@@ -371,6 +486,45 @@ static Doc *parse(Rd *r, char *err)
                 }
             } else if (key == K('i','O','p','a'))
                 rc->fill = u8(r);
+            else if (key == K('l','e','v','l') && len >= 12) {
+                /* Version, dann je Kanal 5 Werte; der erste Satz gilt fuer RGB */
+                u16(r);
+                rc->adj_v[0] = u16(r);          /* Input Black */
+                rc->adj_v[2] = u16(r);          /* Input White */
+                rc->adj_v[3] = u16(r);          /* Output Black */
+                rc->adj_v[4] = u16(r);          /* Output White */
+                rc->adj_v[1] = u16(r);          /* Gamma * 100 */
+                rc->adj_cmd = CMD_ADJ_LEVELS;
+                rc->adjust = TRUE;
+            } else if (key == K('h','u','e','2') && len >= 16) {
+                LONG colorize;
+                u16(r);
+                colorize = u8(r);
+                u8(r);
+                u16(r); u16(r); u16(r);         /* Einfaerben: nicht unterstuetzt */
+                rc->adj_v[0] = (WORD)u16(r);    /* Master: Farbton, Saettigung, Helligkeit */
+                rc->adj_v[1] = (WORD)u16(r);
+                rc->adj_v[2] = (WORD)u16(r);
+                rc->adj_cmd = colorize ? 0 : CMD_ADJ_HUESAT;
+                rc->adjust = TRUE;
+            } else if (key == K('b','r','i','t') && len >= 4) {
+                rc->adj_v[0] = (WORD)u16(r);
+                rc->adj_v[1] = (WORD)u16(r);
+                rc->adj_cmd = CMD_ADJ_BRICON;
+                rc->adjust = TRUE;
+            } else if (key == K('n','v','r','t')) {
+                rc->adj_cmd = CMD_ADJ_INVERT;
+                rc->adjust = TRUE;
+            } else if (key == K('t','h','r','s') && len >= 2) {
+                rc->adj_v[0] = u16(r);
+                rc->adj_cmd = CMD_ADJ_THRESH;
+                rc->adjust = TRUE;
+            } else if (key == K('p','o','s','t') && len >= 2) {
+                rc->adj_v[0] = u16(r);
+                rc->adj_cmd = CMD_ADJ_POSTER;
+                rc->adjust = TRUE;
+            } else if (key == K('l','r','F','X') && len >= 4)
+                read_lrfx(r, rc, tell(r) + len);
             else if (key == K('l','e','v','l') || key == K('c','u','r','v') || key == K('h','u','e','2') ||
                      key == K('b','r','i','t') || key == K('n','v','r','t') || key == K('p','o','s','t') ||
                      key == K('t','h','r','s') || key == K('b','l','n','c') || key == K('s','e','l','c') ||
@@ -437,10 +591,38 @@ static Doc *parse(Rd *r, char *err)
             l->pass = rc->pass;
             l->collapsed = rc->section == 2;
             l->clip = 0;
+        } else if (rc->adjust && rc->adj_cmd &&
+                   (l->adj = AllocVec(sizeof(AdjInfo), MEMF_ANY | MEMF_CLEAR)) &&
+                   (l->mask = AllocVec(d->tw * d->th * sizeof(Tile *), MEMF_ANY | MEMF_CLEAR))) {
+            /* Korrekturebene: Werte uebernehmen, Maske kommt ggf. aus Kanal -2 */
+            LONG k2;
+            l->kind = LK_ADJUST;
+            l->mask_on = 1;
+            adjust_defaults(l->adj, rc->adj_cmd);
+            if (rc->adj_cmd != CMD_ADJ_INVERT)
+                for (k2 = 0; k2 < 6; k2++)
+                    l->adj->v[k2] = rc->adj_v[k2];
+            if (rc->adj_cmd == CMD_ADJ_LEVELS) {
+                if (!l->adj->v[1])
+                    l->adj->v[1] = 100;
+                if (!l->adj->v[2])
+                    l->adj->v[2] = 255;
+                if (!l->adj->v[4])
+                    l->adj->v[4] = 255;
+            }
         } else if (rc->adjust) {
+            if (l->adj) {
+                FreeVec(l->adj);
+                l->adj = NULL;
+            }
             l->visible = 0;     /* Korrekturebene: nicht unterstuetzt */
             strcpy(l->name, "(Adjustment) ");
             strncat(l->name, rc->name, 31 - strlen(l->name));
+        }
+        if (rc->has_fx && l->kind == LK_PIXEL && (l->fx = AllocVec(sizeof(LayerFx), MEMF_ANY))) {
+            *l->fx = rc->fx;
+            if (l->fx->st_size < 1)
+                l->fx->st_size = 3;
         }
         if (lw > 0 && lh > 0 && l->kind == LK_PIXEL) {
             if (!(buf = AllocVec(lw * lh * 4, MEMF_ANY)))
@@ -456,11 +638,11 @@ static Doc *parse(Rd *r, char *err)
             WORD id = rc->chid[k];
             seek_to(r, chstart + off);
             if (id == -2 && mbuf)
-                read_channel(r, mw, mh, mbuf, 1, row);
+                read_channel(r, mw, mh, mbuf, 1, row, rc->chlen[k]);
             else if (buf && id >= -1 && id <= 2) {
                 /* ARGB in Big-Endian-Bytes: A=0, R=1, G=2, B=3 */
                 LONG byte = id == -1 ? 0 : id + 1;
-                read_channel(r, lw, lh, (UBYTE *)buf + byte, 4, row);
+                read_channel(r, lw, lh, (UBYTE *)buf + byte, 4, row, rc->chlen[k]);
             }
             off += rc->chlen[k];
         }
