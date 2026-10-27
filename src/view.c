@@ -52,6 +52,15 @@ float scr2docy(LONG sy) { return (sy - oy) / zoom; }
 LONG doc2scrx(float dx) { return ox + (LONG)floorf(dx * zoom); }
 LONG doc2scry(float dy) { return oy + (LONG)floorf(dy * zoom); }
 
+void view_free(void)
+{
+    if (xmap) FreeVec(xmap);
+    if (xrunend) FreeVec(xrunend);
+    if (ymap) FreeVec(ymap);
+    xmap = xrunend = NULL;
+    ymap = NULL;
+}
+
 void view_init(void)
 {
     cvx = TOOL_W;

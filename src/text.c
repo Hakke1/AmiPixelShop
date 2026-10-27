@@ -42,6 +42,8 @@ static char tx_buf[1024];       /* UTF-8 */
 static LONG tx_x, tx_y;         /* Grundlinie der ersten Zeile (Dokument) */
 static LONG car_x, car_y0, car_y1;     /* Schreibmarke (Dokument) */
 static LONG cv_x0, cv_y0, cv_x1, cv_y1; /* Overlay-Box am Schirm */
+static LONG tx_boxw, tx_boxh;   /* Absatztext: Rahmen ab (tx_x, tx_y), 0 = Punkttext */
+static float tx_scale;
 
 BOOL text_active(void)
 {
@@ -220,11 +222,69 @@ static ULONG next_cp(const UBYTE **sp)
 static void caret_inval(void)
 {
     view_inval(cv_x0, cv_y0, cv_x1, cv_y1);
+    if (tx_boxw > 0)
+        view_inval(doc2scrx((float)tx_x) - 2, doc2scry((float)tx_y) - 2,
+                   doc2scrx((float)(tx_x + tx_boxw)) + 3, doc2scry((float)(tx_y + tx_boxh)) + 3);
     cv_x0 = doc2scrx((float)car_x) - 2;
     cv_x1 = doc2scrx((float)car_x) + 3;
     cv_y0 = doc2scry((float)car_y0) - 2;
     cv_y1 = doc2scry((float)car_y1) + 3;
     view_inval(cv_x0, cv_y0, cv_x1, cv_y1);
+}
+
+/* Breite von s..e wie gezeichnet (Kerning, Tracking) */
+static float seg_width(const UBYTE *s, const UBYTE *e)
+{
+    float w = 0.0f;
+    ULONG prev = 0;
+    while (s < e) {
+        ULONG cp = next_cp(&s);
+        int adv, lsb;
+        if (prev)
+            w += stbtt_GetCodepointKernAdvance(&finfo, prev, cp) * tx_scale + text_track * text_size / 1000.0f;
+        stbtt_GetCodepointHMetrics(&finfo, cp, &adv, &lsb);
+        w += adv * tx_scale;
+        prev = cp;
+    }
+    return w;
+}
+
+/* naechste Zeile ab s: Ende (exklusiv); *next = Anfang der folgenden.
+ * Absatztext bricht an Leerzeichen um, ueberlange Woerter zeichenweise. */
+static const UBYTE *wrap_line(const UBYTE *s, const UBYTE **next)
+{
+    const UBYTE *e = s, *p, *best = NULL, *q, *ok;
+    while (*e && *e != '\n')
+        e++;
+    if (tx_boxw <= 0 || seg_width(s, e) <= tx_boxw) {
+        *next = *e ? e + 1 : e;
+        return e;
+    }
+    for (p = s; p < e; p++)
+        if (*p == ' ') {
+            if (seg_width(s, p) <= tx_boxw)
+                best = p;
+            else
+                break;
+        }
+    if (best && best > s) {
+        for (q = best; *q == ' '; q++)
+            ;
+        *next = q;
+        return best;
+    }
+    q = s;
+    next_cp(&q);
+    ok = q;                     /* mindestens ein Zeichen je Zeile */
+    while (q < e) {
+        const UBYTE *r = q;
+        next_cp(&r);
+        if (seg_width(s, r) > tx_boxw)
+            break;
+        q = ok = r;
+    }
+    *next = ok;
+    return ok;
 }
 
 static void render(void)
@@ -265,61 +325,62 @@ static void render(void)
         return;
     }
     scale = stbtt_ScaleForPixelHeight(&finfo, (float)text_size);
+    tx_scale = scale;
     stbtt_GetFontVMetrics(&finfo, &asc, &desc, &gap);
     lh = text_lead > 0 ? text_lead : (LONG)((asc - desc + gap) * scale + 0.5f);
-    pen_y = tx_y;
+    /* Punkttext: Anker = Grundlinie; Absatztext: Anker = Rahmen oben links */
+    pen_y = tx_boxw > 0 ? tx_y + (LONG)(asc * scale + 0.5f) : tx_y;
     pen_x = (float)tx_x;
-    while (1) {
-        /* Zeile: erst messen (Ausrichtung), dann zeichnen */
-        const UBYTE *ls = s;
-        float wdt = 0.0f;
-        LONG pass;
-        for (pass = 0; pass < 2; pass++) {
-            s = ls;
-            prev = 0;
-            pen_x = pass == 0 ? 0.0f :
-                    (float)tx_x - (text_align == 1 ? wdt * 0.5f : text_align == 2 ? wdt : 0.0f);
-            while (*s && *s != '\n') {
-                ULONG cp = next_cp(&s);
-                int adv, lsb, x0, y0, x1, y1, w, h, gx, gy;
-                if (prev)
-                    pen_x += stbtt_GetCodepointKernAdvance(&finfo, prev, cp) * scale + text_track * text_size / 1000.0f;
-                stbtt_GetCodepointHMetrics(&finfo, cp, &adv, &lsb);
-                if (pass == 1) {
-                    stbtt_GetCodepointBitmapBoxSubpixel(&finfo, cp, scale, scale, pen_x - floorf(pen_x), 0.0f,
-                                                        &x0, &y0, &x1, &y1);
-                    w = x1 - x0;
-                    h = y1 - y0;
-                    if (w > 0 && h > 0) {
-                        LONG px0 = (LONG)floorf(pen_x), gx0 = px0 + x0, gy0 = pen_y + y0;
-                        if (gx0 < tx_bx0) tx_bx0 = gx0;
-                        if (gy0 < tx_by0) tx_by0 = gy0;
-                        if (gx0 + w > tx_bx1) tx_bx1 = gx0 + w;
-                        if (gy0 + h > tx_by1) tx_by1 = gy0 + h;
-                        if (w * h > gsize) {
-                            if (gbuf)
-                                FreeVec(gbuf);
-                            gsize = w * h;
-                            gbuf = AllocVec(gsize, MEMF_ANY);
-                        }
-                        if (gbuf) {
-                            stbtt_MakeCodepointBitmapSubpixel(&finfo, gbuf, w, h, w, scale, scale,
-                                                              pen_x - floorf(pen_x), 0.0f, cp);
-                            for (gy = 0; gy < h; gy++)
-                                for (gx = 0; gx < w; gx++)
-                                    put(px0 + x0 + gx, pen_y + y0 + gy, gbuf[gy * w + gx]);
-                        }
-                    }
+    for (;;) {
+        const UBYTE *nx, *e = wrap_line(s, &nx), *c;
+        float wdt = seg_width(s, e);
+        float ax = (float)tx_x + (tx_boxw > 0 ? (text_align == 1 ? tx_boxw * 0.5f : text_align == 2 ? tx_boxw : 0.0f) : 0.0f);
+        BOOL vis = tx_boxw <= 0 || tx_boxh <= 0 || pen_y - (LONG)(desc * scale) <= tx_y + tx_boxh;
+        pen_x = ax - (text_align == 1 ? wdt * 0.5f : text_align == 2 ? wdt : 0.0f);
+        prev = 0;
+        for (c = s; c < e; ) {
+            ULONG cp = next_cp(&c);
+            int adv, lsb, x0, y0, x1, y1, w, h, gx, gy;
+            if (prev)
+                pen_x += stbtt_GetCodepointKernAdvance(&finfo, prev, cp) * scale + text_track * text_size / 1000.0f;
+            stbtt_GetCodepointHMetrics(&finfo, cp, &adv, &lsb);
+            stbtt_GetCodepointBitmapBoxSubpixel(&finfo, cp, scale, scale, pen_x - floorf(pen_x), 0.0f,
+                                                &x0, &y0, &x1, &y1);
+            w = x1 - x0;
+            h = y1 - y0;
+            if (vis && w > 0 && h > 0) {
+                LONG px0 = (LONG)floorf(pen_x), gx0 = px0 + x0, gy0 = pen_y + y0;
+                if (gx0 < tx_bx0) tx_bx0 = gx0;
+                if (gy0 < tx_by0) tx_by0 = gy0;
+                if (gx0 + w > tx_bx1) tx_bx1 = gx0 + w;
+                if (gy0 + h > tx_by1) tx_by1 = gy0 + h;
+                if (w * h > gsize) {
+                    if (gbuf)
+                        FreeVec(gbuf);
+                    gsize = w * h;
+                    gbuf = AllocVec(gsize, MEMF_ANY);
                 }
-                pen_x += adv * scale;
-                prev = cp;
+                if (gbuf) {
+                    stbtt_MakeCodepointBitmapSubpixel(&finfo, gbuf, w, h, w, scale, scale,
+                                                      pen_x - floorf(pen_x), 0.0f, cp);
+                    for (gy = 0; gy < h; gy++)
+                        for (gx = 0; gx < w; gx++)
+                            put(px0 + x0 + gx, pen_y + y0 + gy, gbuf[gy * w + gx]);
+                }
             }
-            wdt = pen_x;
+            pen_x += adv * scale;
+            prev = cp;
         }
-        if (!*s)
+        if (!*e)
             break;
-        s++;                    /* Zeilenumbruch */
+        s = nx;
         pen_y += lh;
+    }
+    if (tx_boxw > 0) {          /* Rahmen gehoert zum Umriss (Klick zum Bearbeiten) */
+        if (tx_x < tx_bx0) tx_bx0 = tx_x;
+        if (tx_y < tx_by0) tx_by0 = tx_y;
+        if (tx_x + tx_boxw > tx_bx1) tx_bx1 = tx_x + tx_boxw;
+        if (tx_y + tx_boxh > tx_by1) tx_by1 = tx_y + tx_boxh;
     }
     if (gbuf)
         FreeVec(gbuf);
@@ -328,8 +389,6 @@ static void render(void)
             tile_update_flag(doc, tx_layer->tiles[i], i % doc->tw, i / doc->tw);
             doc_mark_dirty(i % doc->tw, i / doc->tw);
         }
-    if (!tx_buf[0] || tx_buf[strlen(tx_buf) - 1] == '\n')
-        pen_x = (float)tx_x;    /* leere Zeile: Marke am Anker */
     car_x = (LONG)pen_x;
     car_y0 = pen_y - (LONG)(asc * scale);
     car_y1 = pen_y - (LONG)(desc * scale);
@@ -339,6 +398,12 @@ static void render(void)
 /* Schreibmarke als Overlay */
 static void text_overlay(void)
 {
+    if (tx_boxw > 0) {
+        LONG x0 = doc2scrx((float)tx_x), y0 = doc2scry((float)tx_y);
+        LONG x1 = doc2scrx((float)(tx_x + tx_boxw)), y1 = doc2scry((float)(tx_y + tx_boxh));
+        frame(x0 - 1, y0 - 1, x1 - x0 + 2, y1 - y0 + 2, 0xFF000000);
+        frame(x0, y0, x1 - x0, y1 - y0, 0xFFFFFFFF);
+    }
     LONG x = doc2scrx((float)car_x), y0 = doc2scry((float)car_y0), y1 = doc2scry((float)car_y1);
     fill(x, y0, 1, y1 - y0, 0xFF000000);
     fill(x + 1, y0, 1, y1 - y0, 0xFFFFFFFF);
@@ -369,6 +434,7 @@ BOOL text_begin(LONG x, LONG y)
     tx_buf[0] = 0;
     tx_x = x;
     tx_y = y;
+    tx_boxw = tx_boxh = 0;
     tx_on = TRUE;
     tx_editing = FALSE;
     tx_saved = FALSE;
@@ -407,6 +473,8 @@ BOOL text_begin_edit(Layer *l)
     strcpy(tx_buf, l->text->str);
     tx_x = l->text->x;
     tx_y = l->text->y;
+    tx_boxw = l->text->boxw;
+    tx_boxh = l->text->boxh;
     text_size = l->text->size;
     fg_color = l->text->color;
     text_align = l->text->align;
@@ -458,6 +526,9 @@ static void drop_layer(void)
 static void end_session(void)
 {
     view_inval(cv_x0, cv_y0, cv_x1, cv_y1);
+    if (tx_boxw > 0)            /* Rahmen wegraeumen */
+        view_inval(doc2scrx((float)tx_x) - 2, doc2scry((float)tx_y) - 2,
+                   doc2scrx((float)(tx_x + tx_boxw)) + 3, doc2scry((float)(tx_y + tx_boxh)) + 3);
     view_text_overlay = NULL;
     tx_on = FALSE;
     tx_editing = FALSE;
@@ -485,6 +556,8 @@ void text_commit(void)
         t->color = fg_color;
         t->x = tx_x;
         t->y = tx_y;
+        t->boxw = tx_boxw;
+        t->boxh = tx_boxh;
         t->align = text_align;
         t->aa = text_aa;
         t->tracking = text_track;
@@ -621,4 +694,40 @@ void text_set_props(LONG size, LONG align, LONG track, LONG lead)
     text_size = sz; text_align = al; text_aa = aa; text_track = tr; text_lead = ld;
     text_font = fo;
     fg_color = fg;
+}
+
+/* Absatztext im Rahmen (x, y = oben links) */
+BOOL text_begin_box(LONG x, LONG y, LONG w, LONG h)
+{
+    if (!text_begin(x, y))
+        return FALSE;
+    tx_boxw = w;
+    tx_boxh = h;
+    render();
+    view_inval_all();
+    return TRUE;
+}
+
+/* Rahmen beim Aufziehen zeigen (x1 < 0: beenden) */
+static LONG pv_x0, pv_y0, pv_x1, pv_y1;
+
+static void box_overlay(void)
+{
+    LONG x0 = doc2scrx((float)pv_x0), y0 = doc2scry((float)pv_y0);
+    LONG x1 = doc2scrx((float)pv_x1), y1 = doc2scry((float)pv_y1);
+    frame(x0 - 1, y0 - 1, x1 - x0 + 2, y1 - y0 + 2, 0xFF000000);
+    frame(x0, y0, x1 - x0, y1 - y0, 0xFFFFFFFF);
+}
+
+void text_box_preview(LONG x0, LONG y0, LONG x1, LONG y1)
+{
+    view_inval_all();
+    if (x1 < 0) {
+        if (view_text_overlay == box_overlay)
+            view_text_overlay = NULL;
+        return;
+    }
+    pv_x0 = x0 < x1 ? x0 : x1; pv_x1 = x0 < x1 ? x1 : x0;
+    pv_y0 = y0 < y1 ? y0 : y1; pv_y1 = y0 < y1 ? y1 : y0;
+    view_text_overlay = box_overlay;
 }

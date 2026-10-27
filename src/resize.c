@@ -292,6 +292,7 @@ static Doc *build(Doc *s, LONG nw, LONG nh, BOOL scale, LONG ox, LONG oy)
                 t->size = (LONG)(t->size * (kx < ky ? kx : ky) + 0.5f);
                 if (t->size < 1) t->size = 1;
                 t->bx0 = (LONG)(t->bx0 * kx); t->bx1 = (LONG)(t->bx1 * kx);
+                t->boxw = (LONG)(t->boxw * kx); t->boxh = (LONG)(t->boxh * ky);
                 t->by0 = (LONG)(t->by0 * ky); t->by1 = (LONG)(t->by1 * ky);
             } else {
                 t->x += ox; t->y += oy;

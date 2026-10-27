@@ -279,9 +279,11 @@ static LONG slider_draw(Slider *s, LONG x, LONG y)
         /* "100%", "12°" ohne Leerzeichen, "30 px" mit */
         sprintf(buf, (s->unit[0] == '%' || (UBYTE)s->unit[0] == 0xC2) ? "%ld%s" : "%ld %s",
                 (long)*s->val, s->unit);
-    fill(x + s->tw + 8, y, 64, FONT_H, COL_BAR);
-    text(x + s->tw + 8, y, buf, COL_TEXT);
-    return x + s->tw + 64;
+    /* Wert als Eingabefeld (Klick: Zahl eintippen) */
+    fill(x + s->tw + 6, y - 2, 56, FONT_H + 4, COL_FIELD);
+    frame(x + s->tw + 6, y - 2, 56, FONT_H + 4, COL_LINE);
+    text(x + s->tw + 10, y, buf, COL_TEXT);
+    return x + s->tw + 66;
 }
 
 /* Zahl eintippen: Klick auf den Wert eines Reglers */
@@ -1526,7 +1528,7 @@ static void draw_layers_tab(LONG y)
         draw_icon12(bx + 5, ly_locky + 4, lock_icons[i], on ? 0xFFFFFFFF : COL_DIM);
     }
     layer_fill_pct = (al->fill * 100 + 127) / 255;
-    sl_lfill.tw = 40;
+    sl_lfill.tw = 20;
     slider_draw(&sl_lfill, px + 146, ly_locky + 2);
     fill(px + 1, y + 84, PANEL_W - 1, 1, COL_LINE);
     ly_list = y + 85;
@@ -2394,7 +2396,7 @@ void ui_draw_status(void)
     LONG y = SH - STATUS_H, x;
     ULONG us = last_flush_us;
     fmt_zoom(z, zoom);
-    sprintf(buf, "%s|Doc: %ld × %ld px|Redraw: %ld.%ld ms%s%s", z,
+    sprintf(buf, "|Doc: %ld × %ld px|Redraw: %ld.%ld ms%s%s",
             (long)doc->w, (long)doc->h, (long)(us / 1000), (long)((us / 100) % 10),
             status_msg[0] ? "|" : "", status_msg);
     if (!strcmp(buf, last))
@@ -2402,9 +2404,13 @@ void ui_draw_status(void)
     strcpy(last, buf);
     fill(cvx, y, cvw, STATUS_H, COL_BAR);
     fill(cvx, y, cvw, 1, COL_LINE);
+    /* Zoom: Eingabefeld (Klick: Prozent eintippen) */
+    fill(cvx + 4, y + 3, 64, STATUS_H - 5, COL_FIELD);
+    frame(cvx + 4, y + 3, 64, STATUS_H - 5, COL_LINE);
+    text(cvx + 10, y + 3, z, COL_TEXT);
     {
-        char *p = buf, *q;
-        x = cvx + 8;
+        char *p = buf + 1, *q;
+        x = cvx + 78;
         while (p) {
             q = strchr(p, '|');
             if (q)
@@ -2743,6 +2749,24 @@ BOOL ui_mouse_down(LONG x, LONG y)
     LONG i, ty;
 
     tt_hide();
+
+    /* Zoom-Feld in der Statusleiste */
+    if (menu_open < 0 && y >= SH - STATUS_H && x >= cvx + 4 && x < cvx + 68) {
+        char buf[16];
+        BOOL ok;
+        LONG v;
+        sprintf(buf, "%ld", (long)floorf(zoom * 100.0f + 0.5f));
+        if (ui_edit_text(cvx + 4, SH - STATUS_H + 2, 64, buf, sizeof(buf))) {
+            v = parse_value(buf, 1, &ok);
+            if (ok) {
+                if (v < 6) v = 6;
+                if (v > 3200) v = 3200;
+                view_set_zoom(v / 100.0f, cvx + cvw / 2, cvy + cvh / 2);
+            }
+        }
+        ui_draw_status();
+        return TRUE;
+    }
 
     if (menu_open >= 0) {
         LONG m = menu_open, it;

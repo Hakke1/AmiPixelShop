@@ -49,8 +49,10 @@ typedef struct TextInfo {
     LONG aa;                    /* 0 Smooth, 1 Sharp, 2 None */
     LONG tracking;              /* 1/1000 em */
     LONG leading;               /* Zeilenabstand px, 0 = Auto */
+    LONG boxw, boxh;            /* Absatztext: Rahmen (x, y = oben links), 0 = Punkttext */
 } TextInfo;
 #define TEXTINFO_V1 352         /* Groesse ohne die angehaengten Felder */
+#define TEXTINFO_V2 368         /* mit align .. leading */
 
 /* Ueberhang: Pixel einer Ebene ausserhalb der Arbeitsflaeche (ARGB straight;
  * Pixel innerhalb der Flaeche werden nicht benutzt) */
@@ -339,6 +341,7 @@ extern float zoom;
 extern LONG ox, oy;
 extern LONG cvx, cvy, cvw, cvh;
 void view_init(void);
+void view_free(void);
 void view_fit(void);
 void view_save(void);           /* Zoom/Position im aktiven Dokument merken */
 void view_restore(void);
@@ -401,6 +404,8 @@ extern LONG text_size, text_font;
 BOOL text_active(void);
 BOOL text_begin(LONG x, LONG y);
 BOOL text_begin_edit(Layer *l);
+BOOL text_begin_box(LONG x, LONG y, LONG w, LONG h);
+void text_box_preview(LONG x0, LONG y0, LONG x1, LONG y1);
 Layer *text_layer_at(LONG x, LONG y);
 void text_commit(void);
 void text_cancel(void);

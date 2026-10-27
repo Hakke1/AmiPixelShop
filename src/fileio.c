@@ -398,7 +398,7 @@ static BOOL read_chunks(BPTR fh, Doc *d, Layer *l, char *err)
                     break;
             } else
                 Seek(fh, len, OFFSET_CURRENT);
-        } else if (tag == TAG_TEXT && (len == sizeof(TextInfo) || len == TEXTINFO_V1)) {
+        } else if (tag == TAG_TEXT && (len == sizeof(TextInfo) || len == TEXTINFO_V1 || len == TEXTINFO_V2)) {
             if ((l->text = AllocVec(sizeof(TextInfo), MEMF_ANY | MEMF_CLEAR))) {
                 if (!rd(fh, l->text, len))
                     break;

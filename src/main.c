@@ -49,7 +49,8 @@ static BOOL ptr_hidden;
 
 /* Interaktion */
 static BOOL painting, panning, space_down, lasso_drag, marquee_drag, poly_active, picking;
-static BOOL grad_drag, cropping, shaping, quicksel, penning;
+static BOOL grad_drag, cropping, shaping, quicksel, penning, texting;
+static float tb_x0, tb_y0;
 static float qs_lx, qs_ly;
 static float shp_x0, shp_y0, shp_x1, shp_y1;
 
@@ -64,6 +65,7 @@ static void busy(BOOL on);
 static ULONG ask_screenmode(struct Screen *on, ULONG initial);
 static BOOL mode_size(ULONG id, LONG *w, LONG *h);
 static void after_edit(void);
+static BOOL switch_screen(ULONG modeid);
 static float mv_sx, mv_sy;
 static LONG mv_dx, mv_dy;
 static char last_drawer[256] = "Work:";
@@ -492,13 +494,17 @@ static void mouse_down(UWORD qual, ULONG secs, ULONG mics)
         if (text_active())
             text_commit();
         /* Klick auf eine Textebene bearbeitet sie, sonst neuer Text */
-        if ((tl = text_layer_at((LONG)floorf(dx), (LONG)floorf(dy))))
+        if ((tl = text_layer_at((LONG)floorf(dx), (LONG)floorf(dy)))) {
             text_begin_edit(tl);
-        else
-            text_begin((LONG)floorf(dx), (LONG)floorf(dy));
-        after_edit();
-        ui_draw_options();
-        ui_draw_toolbar();
+            after_edit();
+            ui_draw_options();
+            ui_draw_toolbar();
+        } else {
+            /* Klick: Punkttext, Ziehen: Absatztext (entschieden beim Loslassen) */
+            texting = TRUE;
+            tb_x0 = dx;
+            tb_y0 = dy;
+        }
         break; }
     case T_EYEDROP:
         picking = TRUE;
@@ -569,6 +575,8 @@ static void mouse_move(void)
     } else if (shaping) {
         shape_end_point(dx, dy);
         shape_preview();
+    } else if (texting) {
+        text_box_preview((LONG)floorf(tb_x0), (LONG)floorf(tb_y0), (LONG)floorf(dx), (LONG)floorf(dy));
     } else if (penning) {
         path_mouse_move(mouse_x, mouse_y);
     } else if (cropping) {
@@ -664,6 +672,20 @@ static void mouse_up(void)
             busy(FALSE);
             after_edit();
         }
+    }
+    if (texting) {
+        float x = scr2docx(mouse_x), y = scr2docy(mouse_y);
+        LONG x0 = (LONG)floorf(tb_x0 < x ? tb_x0 : x), y0 = (LONG)floorf(tb_y0 < y ? tb_y0 : y);
+        LONG w = (LONG)fabsf(x - tb_x0), h = (LONG)fabsf(y - tb_y0);
+        texting = FALSE;
+        text_box_preview(0, 0, 0, -1);
+        if (w * zoom > 8 && h * zoom > 8)
+            text_begin_box(x0, y0, w, h);
+        else
+            text_begin((LONG)floorf(tb_x0), (LONG)floorf(tb_y0));
+        after_edit();
+        ui_draw_options();
+        ui_draw_toolbar();
     }
     if (penning) {
         path_mouse_up(mouse_x, mouse_y);
@@ -1516,10 +1538,18 @@ void do_command(LONG c)
         ULONG id = ask_screenmode(scr, GetVPModeID(&scr->ViewPort));
         LONG w, h;
         redraw_all();
-        if (id != INVALID_ID && mode_size(id, &w, &h)) {
-            pref_mode = id;
-            ui_prefs_save();
-            request("The new screen mode is used\nthe next time AmiPixelShop starts.", "OK");
+        if (id != INVALID_ID && mode_size(id, &w, &h) && id != GetVPModeID(&scr->ViewPort)) {
+            finish_interaction();
+            if (!switch_screen(id)) {
+                if (!win) {
+                    quit = TRUE;    /* kein Bildschirm mehr */
+                    break;
+                }
+                request("This screen mode could not be opened.", "OK");
+            } else {
+                pref_mode = id;
+                ui_prefs_save();
+            }
         }
         break; }
     case CMD_TOOLBAR:
@@ -1957,6 +1987,84 @@ static BOOL mode_size(ULONG id, LONG *w, LONG *h)
     return *w <= 1920 && *h <= 1080;
 }
 
+/* eigenen Bildschirm samt Fenster und Hintergrundpuffer oeffnen */
+static BOOL open_screen(ULONG modeid)
+{
+    scr = OpenScreenTags(NULL,
+        SA_DisplayID, modeid,
+        SA_Width, SW, SA_Height, SH,
+        SA_Depth, 24,
+        SA_Quiet, TRUE,
+        SA_ShowTitle, FALSE,
+        SA_Type, CUSTOMSCREEN,
+        SA_Title, (ULONG)"AmiPixelShop",
+        SA_LikeWorkbench, TRUE,
+        TAG_DONE);
+    if (!scr)
+        return FALSE;
+    SW = scr->Width;
+    SH = scr->Height;
+
+    win = OpenWindowTags(NULL,
+        WA_CustomScreen, (ULONG)scr,
+        WA_Left, 0, WA_Top, 0, WA_Width, SW, WA_Height, SH,
+        WA_Backdrop, TRUE, WA_Borderless, TRUE,
+        WA_Activate, TRUE, WA_RMBTrap, TRUE, WA_ReportMouse, TRUE,
+        WA_IDCMP, IDCMP_MOUSEBUTTONS | IDCMP_MOUSEMOVE | IDCMP_RAWKEY | IDCMP_INTUITICKS,
+        TAG_DONE);
+    bb = AllocVec(SW * SH * 4, MEMF_ANY);
+    return win && bb;
+}
+
+static void close_screen(void)
+{
+    if (win) {
+        if (ptr_hidden)
+            ClearPointer(win);
+        ptr_hidden = FALSE;
+        CloseWindow(win);
+    }
+    if (scr)
+        CloseScreen(scr);
+    if (bb)
+        FreeVec(bb);
+    win = NULL;
+    scr = NULL;
+    bb = NULL;
+}
+
+/* Bildschirmmodus wechseln, ohne neu zu starten */
+static BOOL switch_screen(ULONG modeid)
+{
+    ULONG old = GetVPModeID(&scr->ViewPort);
+    LONG ow = SW, oh = SH, i;
+    if (!mode_size(modeid, &SW, &SH)) {
+        SW = ow;
+        SH = oh;
+        return FALSE;
+    }
+    view_save();
+    close_screen();
+    if (!open_screen(modeid)) {
+        /* zurueck zum alten Modus */
+        close_screen();
+        SW = ow;
+        SH = oh;
+        if (!open_screen(old))
+            return FALSE;       /* sehr unwahrscheinlich: Programm endet */
+    }
+    gfx_noclip();
+    view_free();
+    view_init();
+    for (i = 0; i < ndocs; i++)
+        docs[i]->vset = FALSE;  /* neu einpassen */
+    view_restore();
+    ui_draw_all();
+    view_inval_all();
+    view_flush();
+    return TRUE;
+}
+
 static BOOL open_display(void)
 {
     struct Screen *wb;
@@ -1993,31 +2101,8 @@ static BOOL open_display(void)
         modeid = GetVPModeID(&wb->ViewPort);
     UnlockPubScreen(NULL, wb);
 open:
-    scr = OpenScreenTags(NULL,
-        SA_DisplayID, modeid,
-        SA_Width, SW, SA_Height, SH,
-        SA_Depth, 24,
-        SA_Quiet, TRUE,
-        SA_ShowTitle, FALSE,
-        SA_Type, CUSTOMSCREEN,
-        SA_Title, (ULONG)"AmiPixelShop",
-        SA_LikeWorkbench, TRUE,
-        TAG_DONE);
-    if (!scr)
-        return FALSE;
-    SW = scr->Width;
-    SH = scr->Height;
-
-    win = OpenWindowTags(NULL,
-        WA_CustomScreen, (ULONG)scr,
-        WA_Left, 0, WA_Top, 0, WA_Width, SW, WA_Height, SH,
-        WA_Backdrop, TRUE, WA_Borderless, TRUE,
-        WA_Activate, TRUE, WA_RMBTrap, TRUE, WA_ReportMouse, TRUE,
-        WA_IDCMP, IDCMP_MOUSEBUTTONS | IDCMP_MOUSEMOVE | IDCMP_RAWKEY | IDCMP_INTUITICKS,
-        TAG_DONE);
-    bb = AllocVec(SW * SH * 4, MEMF_ANY);
     blank_ptr = AllocVec(16, MEMF_CHIP | MEMF_CLEAR);
-    return win && bb;
+    return open_screen(modeid);
 }
 
 int main(int argc, char **argv)
