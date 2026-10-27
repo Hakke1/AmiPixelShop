@@ -29,6 +29,7 @@
 #include <stdlib.h>
 #include <ctype.h>
 #include "apx.h"
+#include "quant.h"
 #include "stb_image.h"
 #include "stb_image_write.h"
 
@@ -702,6 +703,166 @@ static void rgba_to_rgb(UBYTE *buf, LONG n)
 
 /* ---- oeffentlich ---- */
 
+/* ---- IFF ILBM ---- */
+
+/* ByteRun1: Laeufe ab 3 gleichen Bytes, sonst woertlich (je hoechstens 128) */
+static LONG pack_row(const UBYTE *s, LONG n, UBYTE *d)
+{
+    LONG i = 0, o = 0;
+    while (i < n) {
+        LONG run = 1;
+        while (i + run < n && run < 128 && s[i + run] == s[i])
+            run++;
+        if (run >= 3) {
+            d[o++] = (UBYTE)(257 - run);
+            d[o++] = s[i];
+            i += run;
+        } else {
+            LONG st = i, lit = 0;
+            while (i < n && lit < 128) {
+                if (i + 2 < n && s[i] == s[i + 1] && s[i] == s[i + 2])
+                    break;
+                i++;
+                lit++;
+            }
+            d[o++] = (UBYTE)(lit - 1);
+            memcpy(d + o, s + st, lit);
+            o += lit;
+        }
+    }
+    return o;
+}
+
+/* Vorgaben fuer die Farbreduktion aus der Farbtiefe des Dokuments */
+static void iff_defaults(Doc *d, QuantOpts *o)
+{
+    LONG c = d->colors;
+    o->palmode = c > 0 && c <= 32 ? QP_OCS : QP_ADAPTIVE;
+    o->mode = c == -6 ? QM_HAM6 : c == -8 ? QM_HAM8 : c == 64 ? QM_EHB : QM_NORMAL;
+    o->ncolors = c > 0 ? c : 256;
+    o->dither = QD_FS;
+    o->amount = 100;
+    o->optimize = 1;
+}
+
+BOOL file_export_iff(Doc *d, const char *path, char *err)
+{
+    UBYTE *rgba, *idx = NULL, *plane = NULL, *packed = NULL;
+    ULONG *px = NULL, camg = 0;
+    QuantOpts o;
+    QPalette pal;
+    LONG w = d->w, h = d->h, i, x, y, p, planes, rb, ncmap, bodylen = 0, bodycap;
+    BPTR fh = 0;
+    BOOL ok = FALSE;
+    doc_process_dirty();
+    if (!(rgba = flat_rgba(d, FALSE, NULL))) {
+        strcpy(err, "Not enough memory");
+        return FALSE;
+    }
+    px = AllocVec(w * h * 4, MEMF_ANY);
+    idx = AllocVec(w * h, MEMF_ANY);
+    if (!px || !idx) {
+        strcpy(err, "Not enough memory");
+        goto out;
+    }
+    for (i = 0; i < w * h; i++)
+        px[i] = ((ULONG)rgba[i * 4 + 3] << 24) | ((ULONG)rgba[i * 4] << 16) |
+                ((ULONG)rgba[i * 4 + 1] << 8) | rgba[i * 4 + 2];
+    free(rgba);
+    rgba = NULL;
+    /* Palette: die der letzten Farbreduktion, sonst neu (Vorgaben aus New Document) */
+    if (d->qpal) {
+        pal = *(QPalette *)d->qpal;
+        o.palmode = d->qopt[0]; o.mode = d->qopt[1]; o.ncolors = d->qopt[2];
+        o.dither = d->qopt[3]; o.amount = d->qopt[4]; o.optimize = d->qopt[5];
+    } else {
+        iff_defaults(d, &o);
+        if (!quant_palette_img(px, w, h, &o, &pal)) {
+            strcpy(err, "Not enough memory");
+            goto out;
+        }
+    }
+    if (!quant_map(px, w, h, w, &o, &pal, idx)) {
+        strcpy(err, "Not enough memory");
+        goto out;
+    }
+    planes = quant_planes(&pal);
+    rb = ((w + 15) >> 4) << 1;
+    ncmap = pal.mode == QM_EHB ? 32 : pal.n;
+    bodycap = h * planes * (rb + rb / 128 + 2);
+    plane = AllocVec(rb, MEMF_ANY);
+    packed = AllocVec(bodycap, MEMF_ANY);
+    if (!plane || !packed) {
+        strcpy(err, "Not enough memory");
+        goto out;
+    }
+    /* Bitplanes zeilenweise verschachtelt, je Zeile und Ebene gepackt */
+    for (y = 0; y < h; y++)
+        for (p = 0; p < planes; p++) {
+            const UBYTE *ir = idx + y * w;
+            memset(plane, 0, rb);
+            for (x = 0; x < w; x++)
+                if ((ir[x] >> p) & 1)
+                    plane[x >> 3] |= 0x80 >> (x & 7);
+            bodylen += pack_row(plane, rb, packed + bodylen);
+        }
+    if (pal.mode == QM_HAM6 || pal.mode == QM_HAM8)
+        camg |= 0x800;
+    if (pal.mode == QM_EHB)
+        camg |= 0x80;
+    if (w > 800)
+        camg |= 0x8020;         /* Super-Hires */
+    else if (w > 400)
+        camg |= 0x8000;         /* Hires */
+    if (h > 300)
+        camg |= 0x4;            /* Interlace */
+    if (!(fh = Open(path, MODE_NEWFILE))) {
+        strcpy(err, "Cannot create the file");
+        goto out;
+    }
+    {
+        LONG cmaplen = ncmap * 3, formlen = 4 + (8 + 20) + (8 + cmaplen + (cmaplen & 1)) + (8 + 4) +
+                       (8 + bodylen + (bodylen & 1));
+        UBYTE bmhd[20], pad = 0;
+        UBYTE xa = w > 800 ? 5 : w > 400 ? 10 : 20, ya = h > 300 ? 11 : 22;
+        bmhd[0] = w >> 8; bmhd[1] = w; bmhd[2] = h >> 8; bmhd[3] = h;
+        bmhd[4] = bmhd[5] = bmhd[6] = bmhd[7] = 0;         /* x, y */
+        bmhd[8] = planes; bmhd[9] = 0;                     /* keine Maske */
+        bmhd[10] = 1; bmhd[11] = 0;                        /* ByteRun1 */
+        bmhd[12] = bmhd[13] = 0;                           /* transparente Farbe 0 */
+        bmhd[14] = xa; bmhd[15] = ya;
+        bmhd[16] = w >> 8; bmhd[17] = w; bmhd[18] = h >> 8; bmhd[19] = h;
+        ok = wr32(fh, 0x464F524D) && wr32(fh, formlen) && wr32(fh, 0x494C424D) &&
+             wr32(fh, 0x424D4844) && wr32(fh, 20) && wr(fh, bmhd, 20) &&
+             wr32(fh, 0x434D4150) && wr32(fh, cmaplen);
+        for (i = 0; ok && i < ncmap; i++) {
+            UBYTE c[3];
+            c[0] = pal.col[i] >> 16; c[1] = pal.col[i] >> 8; c[2] = pal.col[i];
+            ok = wr(fh, c, 3);
+        }
+        if (ok && (cmaplen & 1))
+            ok = wr(fh, &pad, 1);
+        ok = ok && wr32(fh, 0x43414D47) && wr32(fh, 4) && wr32(fh, camg) &&
+             wr32(fh, 0x424F4459) && wr32(fh, bodylen) && wr(fh, packed, bodylen);
+        if (ok && (bodylen & 1))
+            ok = wr(fh, &pad, 1);
+    }
+    if (!ok)
+        strcpy(err, "Write error (disk full?)");
+out:
+    if (fh) {
+        Close(fh);
+        if (!ok)
+            DeleteFile(path);
+    }
+    if (rgba) free(rgba);
+    if (px) FreeVec(px);
+    if (idx) FreeVec(idx);
+    if (plane) FreeVec(plane);
+    if (packed) FreeVec(packed);
+    return ok;
+}
+
 Doc *file_load(const char *path, char *err)
 {
     Doc *d;
@@ -732,6 +893,8 @@ BOOL file_save(Doc *d, const char *path, char *err)
 
     if (ext_is(path, ".aps"))
         return save_aps(d, path, err);
+    if (ext_is(path, ".iff") || ext_is(path, ".ilbm"))
+        return file_export_iff(d, path, err);
 
     doc_process_dirty();
     if (ext_is(path, ".png")) {
@@ -750,7 +913,7 @@ BOOL file_save(Doc *d, const char *path, char *err)
         rgba_to_rgb(buf, d->w * d->h);
         ok = stbi_write_jpg(path, d->w, d->h, 3, buf, 90);
     } else {
-        strcpy(err, "Unknown file extension: use .aps, .png or .jpg");
+        strcpy(err, "Unknown file extension: use .aps, .png, .jpg or .iff");
         return FALSE;
     }
     free(buf);

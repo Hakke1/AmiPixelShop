@@ -582,6 +582,7 @@ void doc_free(Doc *d)
     if (d->bcache) FreeVec(d->bcache);
     if (d->bstate) FreeVec(d->bstate);
     if (d->wpath) FreeVec(d->wpath);
+    if (d->qpal) FreeVec(d->qpal);
     FreeVec(d);
     if (doc == d)
         doc = NULL;

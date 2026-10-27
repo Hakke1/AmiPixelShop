@@ -18,6 +18,7 @@
 #include <stdio.h>
 #include <math.h>
 #include "apx.h"
+#include "quant.h"
 
 typedef struct Filter {
     LONG cmd;
@@ -989,6 +990,76 @@ static void run_edges(ULONG *p, LONG w, LONG h, const LONG *v, LONG ox, LONG oy)
     FreeVec(src);
 }
 
+/* ---- Amiga: Farben reduzieren ---- */
+
+static QPalette q_last;
+static LONG q_shown;            /* Anzahl in der Anzeige */
+
+static void opts_from(const LONG *v, QuantOpts *o)
+{
+    o->palmode = v[0];
+    o->mode = v[1];
+    o->ncolors = v[2];
+    o->dither = v[3];
+    o->amount = v[4];
+    o->optimize = v[5];
+}
+
+static void run_quant(ULONG *p, LONG w, LONG h, const LONG *v, LONG ox, LONG oy)
+{
+    QuantOpts o;
+    opts_from(v, &o);
+    if (!quant_palette_img(p, w, h, &o, &q_last))
+        return;
+    quant_map(p, w, h, w, &o, &q_last, NULL);
+    q_shown = q_last.mode == QM_EHB ? 64 : q_last.n;
+}
+
+static Filter *cur;
+
+static BOOL quant_dialog(void (*prev)(void))
+{
+    LONG *v = cur->val;
+    DlgSlider ds[7] = {
+        { "Palette:", 0, DLG_CHOICE, DLG_CHOICE, "Adaptive|OCS 12-bit|MagicWB|Grayscale", 1 },
+        { "Mode:", 0, DLG_CHOICE, DLG_CHOICE, "Normal|EHB|HAM6|HAM8", 1 },
+        { "Colors:", 0, 2, 256, "", 1 },
+        { "Dither:", 0, DLG_CHOICE, DLG_CHOICE, "None|Floyd-Steinberg|Atkinson|Ordered", 1 },
+        { "Amount:", 0, 0, 100, "%", 1 },
+        { "Optimize Palette", 0, DLG_CHECK, DLG_CHECK, "", 1 },
+        { "Palette", 0, DLG_PALETTE, DLG_PALETTE, "", 1 },
+    };
+    LONG i;
+    BOOL ok;
+    /* Vorgabe aus New Document (Farbtiefe des Dokuments) */
+    if (doc->colors && !doc->qpal) {
+        v[1] = doc->colors == -6 ? QM_HAM6 : doc->colors == -8 ? QM_HAM8 : doc->colors == 64 ? QM_EHB : QM_NORMAL;
+        if (doc->colors > 0)
+            v[2] = doc->colors;
+        v[0] = doc->colors > 0 && doc->colors <= 32 ? QP_OCS : QP_ADAPTIVE;
+    }
+    for (i = 0; i < 6; i++)
+        ds[i].val = &v[i];
+    ds[6].val = &q_shown;
+    ui_dialog_palette(q_last.col, &q_shown);
+    ok = dialog_run("Reduce Colors", ds, 7, prev);
+    ui_dialog_palette(NULL, NULL);
+    return ok;
+}
+
+/* nach dem Anwenden: Palette am Dokument (fuer den IFF-Export) */
+static void quant_store(void)
+{
+    LONG i;
+    if (!doc->qpal && !(doc->qpal = AllocVec(sizeof(QPalette), MEMF_ANY)))
+        return;
+    *(QPalette *)doc->qpal = q_last;
+    for (i = 0; i < 6; i++)
+        doc->qopt[i] = cur->val[i];
+    doc->colors = q_last.mode == QM_HAM6 ? -6 : q_last.mode == QM_HAM8 ? -8 :
+                  q_last.mode == QM_EHB ? 64 : q_last.n;
+}
+
 /* ---- Tabelle aller Korrekturen und Filter ---- */
 
 static Filter filters[] = {
@@ -1037,10 +1108,12 @@ static Filter filters[] = {
     { CMD_FLT_HIGHPASS, "High Pass", 1,
       { { "Radius:", 0, 1, 2500, "px", 10 } }, { 100 }, FALSE, margin_highpass, run_highpass, NULL },
     { CMD_FLT_EDGES, "Find Edges", 0, { { 0 } }, { 0 }, FALSE, margin_one, run_edges, NULL },
+    { CMD_FLT_QUANT, "Reduce Colors", 0, { { 0 } }, { QP_ADAPTIVE, QM_NORMAL, 32, QD_FS, 100, 1 },
+      FALSE, NULL, run_quant, quant_dialog },
 };
 #define NFILTERS (sizeof(filters) / sizeof(filters[0]))
 
-static Filter *cur, *last_filter;
+static Filter *last_filter;
 AdjInfo *adj_curves_target;     /* Curves-Dialog fuer eine Korrekturebene: Kurven live dorthin */
 
 static void preview(void)
@@ -1109,6 +1182,8 @@ void filter_command(LONG cmd)
     }
     if (ok) {
         fl_commit(f->name);
+        if (f->cmd == CMD_FLT_QUANT)
+            quant_store();
         if (f->cmd >= CMD_FLT_GAUSS)
             last_filter = f;
     } else

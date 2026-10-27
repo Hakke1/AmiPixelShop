@@ -46,6 +46,7 @@ static const MenuItem m_file[] = {
     { "Open...", "Ctrl+O", CMD_OPEN }, SEP,
     { "Close", "Ctrl+W", CMD_CLOSE }, { "Close All", "Alt+Ctrl+W", CMD_CLOSE_ALL }, SEP,
     { "Save", "Ctrl+S", CMD_SAVE }, { "Save As...", "Shift+Ctrl+S", CMD_SAVEAS },
+    { "Export as IFF ILBM...", "", CMD_EXPORT_IFF },
     { "Revert", "F12", CMD_REVERT }, SEP,
     { "Quit", "Ctrl+Q", CMD_QUIT }, END };
 static const MenuItem m_fill[] = {
@@ -136,11 +137,13 @@ static const MenuItem m_fpix[] = { { "Mosaic...", "", CMD_FLT_MOSAIC }, END };
 static const MenuItem m_fstyl[] = {
     { "Emboss...", "", CMD_FLT_EMBOSS }, { "Find Edges", "", CMD_FLT_EDGES }, END };
 static const MenuItem m_fother[] = { { "High Pass...", "", CMD_FLT_HIGHPASS }, END };
+static const MenuItem m_famiga[] = { { "Reduce Colors...", "", CMD_FLT_QUANT }, END };
 static const MenuItem m_filter[] = {
     { "Last Filter", "Ctrl+F", CMD_FLT_LAST }, SEP,
     { "Liquify...", "Shift+Ctrl+X", CMD_FLT_LIQUIFY }, SEP,
     SUB("Blur", m_fblur), SUB("Noise", m_fnoise), SUB("Pixelate", m_fpix),
-    SUB("Sharpen", m_fsharp), SUB("Stylize", m_fstyl), SUB("Other", m_fother), END };
+    SUB("Sharpen", m_fsharp), SUB("Stylize", m_fstyl), SUB("Other", m_fother), SEP,
+    SUB("Amiga", m_famiga), END };
 static const MenuItem m_view[] = {
     { "Zoom In", "Ctrl++", CMD_ZOOM_IN }, { "Zoom Out", "Ctrl+-", CMD_ZOOM_OUT }, SEP,
     { "Fit on Screen", "Ctrl+0", CMD_ZOOM_FIT }, { "100%", "Ctrl+1", CMD_ZOOM_100 }, END };
@@ -3558,6 +3561,15 @@ void ui_mouse_up(void)
 static Slider dlg_sl[DLG_MAX];
 static LONG dlg_kind[DLG_MAX], dlg_iy[DLG_MAX], dlg_ix[DLG_MAX], dlg_colw;
 static LONG dlg_cx[DLG_MAX][8], dlg_cw[DLG_MAX][8], dlg_cn[DLG_MAX];
+static const ULONG *dlg_pal;
+static const LONG *dlg_npal;
+
+/* Farbtabelle fuer ein DLG_PALETTE-Element (wird bei jedem Zeichnen gelesen) */
+void ui_dialog_palette(const ULONG *col, const LONG *n)
+{
+    dlg_pal = col;
+    dlg_npal = n;
+}
 
 /* Knopfgruppe einer Auswahl zeichnen (und Lage merken) */
 static LONG dlg_choice(LONG i, LONG x, LONG y, BOOL draw)
@@ -3619,6 +3631,18 @@ static void dlg_draw(void)
         } else if (dlg_kind[i] == DLG_CHOICE) {
             text(dlg_x0 + 16, dlg_iy[i], dlg_sl[i].label, COL_DIM);
             dlg_choice(i, dlg_sl[i].tx, dlg_iy[i], TRUE);
+        } else if (dlg_kind[i] == DLG_PALETTE) {
+            LONG k, n = dlg_npal ? *dlg_npal : 0, px0 = dlg_sl[i].tx, py0 = dlg_iy[i];
+            char buf[32];
+            text(dlg_x0 + 16, py0, dlg_sl[i].label, COL_DIM);
+            fill(px0, py0, 32 * 11, 8 * 11, COL_BAR);
+            for (k = 0; k < n && k < 256 && dlg_pal; k++) {
+                LONG x = px0 + (k & 31) * 11, y = py0 + (k >> 5) * 11;
+                fill(x, y, 10, 10, 0xFF000000 | dlg_pal[k]);
+            }
+            sprintf(buf, "%ld", (long)n);
+            fill(dlg_x0 + 16, py0 + FONT_H + 2, 60, FONT_H, COL_BAR);
+            text(dlg_x0 + 16, py0 + FONT_H + 2, buf, COL_TEXT);
         } else
             slider_draw(&dlg_sl[i], dlg_x0 + 16, dlg_iy[i]);
     }
@@ -3663,6 +3687,9 @@ BOOL dialog_run(const char *title, DlgSlider *ds, LONG n, void (*preview)(void))
     if (dlg_w < 380)
         dlg_w = 380;
     for (i = 0; i < n; i++)
+        if (dlg_kind[i] == DLG_PALETTE && lw + 16 + 6 + 352 + 16 > dlg_w)
+            dlg_w = lw + 16 + 6 + 352 + 16;
+    for (i = 0; i < n; i++)
         if (dlg_kind[i] == DLG_CHOICE) {    /* breit genug fuer alle Knoepfe */
             LONG need = dlg_choice(i, 0, 0, FALSE) + lw + 16 + 6 + 16;
             if (need > dlg_w)
@@ -3697,7 +3724,7 @@ BOOL dialog_run(const char *title, DlgSlider *ds, LONG n, void (*preview)(void))
             dlg_sl[i].x = dlg_x0 + 16;
             dlg_sl[i].y = y;
             dlg_sl[i].tx = dlg_x0 + 16 + lw + 6;
-            y += dlg_kind[i] ? 30 : 34;
+            y += dlg_kind[i] == DLG_PALETTE ? 8 * 11 + 10 : dlg_kind[i] ? 30 : 34;
         }
     dlg_h = y - dlg_y0 + 52;
     dlg_okx = dlg_x0 + dlg_w - 200;
@@ -3737,7 +3764,7 @@ BOOL dialog_run(const char *title, DlgSlider *ds, LONG n, void (*preview)(void))
             case IDCMP_MOUSEBUTTONS:
                 if (code == SELECTDOWN) {
                     for (i = 0; i < n; i++)
-                        if (dlg_kind[i] && my >= dlg_iy[i] - 4 && my < dlg_iy[i] + 22 &&
+                        if (dlg_kind[i] && dlg_kind[i] != DLG_PALETTE && my >= dlg_iy[i] - 4 && my < dlg_iy[i] + 22 &&
                             mx >= dlg_ix[i] - 4 && mx < dlg_ix[i] + dlg_colw - 8) {
                             if (dlg_kind[i] == DLG_CHECK)
                                 *dlg_sl[i].val = !*dlg_sl[i].val;

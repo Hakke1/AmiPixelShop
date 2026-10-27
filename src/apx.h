@@ -153,6 +153,8 @@ typedef struct Doc {
     char name[40];              /* Name aus New Document (bis zum ersten Speichern) */
     LONG colors;                /* Zielfarbtiefe: 0 = RGB, sonst Farben; -6/-8 = HAM6/HAM8 */
     LONG ppi;                   /* Aufloesung (nur Angabe) */
+    void *qpal;                 /* QPalette der letzten Farbreduktion (fuer IFF) oder NULL */
+    LONG qopt[6];               /* deren Einstellungen (QuantOpts) */
     struct Doc *size_prev;      /* Zustand vor Bildgroesse/Arbeitsflaeche/Freistellen (Undo) */
     struct Doc *size_next;      /* ... und danach (Redo) */
     char base_name[32];         /* erster Protokolleintrag, z. B. "Crop"; leer = Open/New */
@@ -569,6 +571,8 @@ LONG adjust_sliders(LONG cmd, DlgSlider *out);
 #define DLG_CHECK (-1)          /* min = max = DLG_CHECK: Checkbox (Abschnitt) */
 #define DLG_COLOR (-2)          /* min = max = DLG_COLOR: Farbfeld, Klick = Farbwaehler */
 #define DLG_CHOICE (-3)         /* min = max = DLG_CHOICE: Knopfgruppe, unit = "A|B|C" */
+#define DLG_PALETTE (-4)        /* min = max = DLG_PALETTE: Farbtabelle (ui_dialog_palette) */
+void ui_dialog_palette(const ULONG *col, const LONG *n);
 BOOL dialog_run(const char *title, DlgSlider *sl, LONG n, void (*preview)(void));
 BOOL ui_color_picker(const char *title, ULONG *color);
 void ui_prefs_load(void);
@@ -619,6 +623,7 @@ void ui_rename_layer(void);
 /* ---- Dateien (fileio.c) ---- */
 Doc *file_load(const char *path, char *err);
 Doc *load_psd(const char *path, char *err);
+BOOL file_export_iff(Doc *d, const char *path, char *err);
 BOOL file_save(Doc *d, const char *path, char *err);
 ULONG *dt_read_argb(APTR name, ULONG srctype, LONG *w, LONG *h, char *err);
 Doc *doc_from_argb_pub(LONG w, LONG h, const ULONG *src);
@@ -649,7 +654,7 @@ enum {
     CMD_ALIGN_RIGHT, CMD_LOREM, CMD_ALL_LAYERS, CMD_DESEL_LAYERS,
     CMD_PATH_SEL, CMD_PATH_FILL, CMD_PATH_STROKE, CMD_PATH_DEL,
     CMD_TF_FREE, CMD_TF_DISTORT, CMD_TF_PERSP, CMD_TF_WARP,
-    CMD_FLT_LIQUIFY, CMD_LQ_APPLY, CMD_LQ_CANCEL,
+    CMD_FLT_LIQUIFY, CMD_LQ_APPLY, CMD_LQ_CANCEL, CMD_EXPORT_IFF,
     CMD_GROUP_NEW, CMD_GROUP, CMD_UNGROUP, CMD_MERGE_GROUP, CMD_ADJ_EDIT,
     CMD_NADJ_BRICON, CMD_NADJ_LEVELS, CMD_NADJ_CURVES, CMD_NADJ_HUESAT, CMD_NADJ_DESAT,
     CMD_NADJ_INVERT, CMD_NADJ_THRESH, CMD_NADJ_POSTER, CMD_FLIP_H, CMD_FLIP_V, CMD_ROT180, CMD_ROT90CW, CMD_ROT90CCW,
@@ -658,7 +663,7 @@ enum {
     CMD_ADJ_THRESH, CMD_ADJ_POSTER, CMD_ADJ_CURVES,
     CMD_FLT_GAUSS, CMD_FLT_UNSHARP, CMD_FLT_NOISE, CMD_FLT_EMBOSS, CMD_FLT_MOSAIC,
     CMD_FLT_MOTION, CMD_FLT_BOX, CMD_FLT_MEDIAN, CMD_FLT_SHARPEN, CMD_FLT_SHARPEN_MORE,
-    CMD_FLT_HIGHPASS, CMD_FLT_EDGES, CMD_FLT_LAST
+    CMD_FLT_HIGHPASS, CMD_FLT_EDGES, CMD_FLT_QUANT, CMD_FLT_LAST
 };
 
 /* ---- Korrekturen und Filter (filter.c) ---- */

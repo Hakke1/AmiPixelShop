@@ -1063,6 +1063,8 @@ static BOOL discard_ok(void)
                    "Discard|Cancel") == 1;
 }
 
+static const char *ask_ext = ".aps";    /* Vorschlag fuer neue Dateinamen */
+
 static BOOL ask_file(BOOL save, char *out, LONG outlen)
 {
     struct FileRequester *fr;
@@ -1073,11 +1075,16 @@ static BOOL ask_file(BOOL save, char *out, LONG outlen)
     if (!AslBase && !(AslBase = OpenLibrary("asl.library", 39)))
         return FALSE;
     strcpy(init, doc_title());
-    if (!doc->path[0])
-        strcat(init, ".aps");
+    if (!doc->path[0] || strcmp(ask_ext, ".aps")) {
+        char *dot = strrchr(init, '.');
+        if (doc->path[0] && dot)
+            *dot = 0;           /* Endung ersetzen */
+        strcat(init, ask_ext);
+    }
     fr = AllocAslRequestTags(ASL_FileRequest,
         ASLFR_Screen, (ULONG)scr,
-        ASLFR_TitleText, (ULONG)(save ? "Save As (.aps, .png, .jpg)" : "Open"),
+        ASLFR_TitleText, (ULONG)(!save ? "Open" : strcmp(ask_ext, ".aps") ? "Export as IFF ILBM" :
+                                 "Save As (.aps, .png, .jpg, .iff)"),
         ASLFR_DoSaveMode, savemode,
         ASLFR_RejectIcons, TRUE,
         ASLFR_InitialDrawer, (ULONG)last_drawer,
@@ -1688,6 +1695,27 @@ void do_command(LONG c)
             break;
         }
         /* fall through */
+    case CMD_EXPORT_IFF: {
+        char err[80], msg[400];
+        BOOL ok;
+        ask_ext = ".iff";
+        ok = ask_file(TRUE, path, sizeof(path));
+        ask_ext = ".aps";
+        if (!ok)
+            break;
+        if (!strchr(FilePart(path), '.'))
+            strncat(path, ".iff", sizeof(path) - strlen(path) - 1);
+        status_message("Exporting...");
+        busy(TRUE);
+        ok = file_export_iff(doc, path, err);
+        busy(FALSE);
+        if (!ok) {
+            sprintf(msg, "Cannot export %s:\n%s", path, err);
+            request(msg, "OK");
+            status_message("");
+        } else
+            status_message("Exported as IFF ILBM");
+        break; }
     case CMD_SAVEAS:
         if (ask_file(TRUE, path, sizeof(path))) {
             if (!strchr(FilePart(path), '.'))
@@ -1903,7 +1931,7 @@ void do_command(LONG c)
     case CMD_FLT_GAUSS: case CMD_FLT_UNSHARP: case CMD_FLT_NOISE: case CMD_FLT_EMBOSS:
     case CMD_FLT_MOSAIC: case CMD_FLT_LAST:
     case CMD_FLT_MOTION: case CMD_FLT_BOX: case CMD_FLT_MEDIAN: case CMD_FLT_SHARPEN:
-    case CMD_FLT_SHARPEN_MORE: case CMD_FLT_HIGHPASS: case CMD_FLT_EDGES:
+    case CMD_FLT_SHARPEN_MORE: case CMD_FLT_HIGHPASS: case CMD_FLT_EDGES: case CMD_FLT_QUANT:
         if (painting || moving)
             break;
         filter_command(c);
