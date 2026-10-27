@@ -1,12 +1,12 @@
 Short:        Layer-based image editor (RTG/PiStorm) BETA
-Author:       radi7777
-Uploader:     YOUR-EMAIL-HERE
+Kurz:         Ebenen-Bildbearbeitung fuer RTG/PiStorm (Beta)
+Author:       radi777
+Uploader:     thomas.radeck gmail com (radi777, see note below)
 Type:         gfx/edit
 Version:      0.3
 Architecture: m68k-amigaos >= 3.2.0
 Requires:     PiStorm (Emu68) or 68060+FPU, RTG 24/32 bit, 128 MB RAM
 Distribution: Aminet
-Kurz:         Ebenen-Bildbearbeitung fuer RTG/PiStorm (Beta)
 
 AmiPixelShop 0.3 - Early Beta
 =============================
@@ -59,3 +59,28 @@ MIT License. Uses stb (Public Domain/MIT), zlib (zlib License) and the
 Open Sans font (Apache License 2.0).
 
 Developed by a professional art designer with the help of Claude.
+
+Note on the uploader address: it is written without the @ and the dot
+to keep address harvesters out. Put an @ before "gmail" and a dot in
+front of "com" and you have it.
+
+
+AmiPixelShop - Ebenen-Bildbearbeitung fuer den Amiga
+====================================================
+
+Eine moderne Bildbearbeitung mit Ebenen, nativ fuer den Amiga
+geschrieben: kein Port, nichts nachgebaut per Reverse Engineering,
+sondern von Grund auf in C und 68k-Assembler. Laeuft auf einem eigenen
+RTG-Bildschirm bis 1920x1080.
+
+Fruehe Beta - Tester gesucht! Fehler bitte auf GitHub melden:
+
+    https://github.com/radi7777/AmiPixelShop
+
+Voraussetzungen: PiStorm (Emu68) oder evtl. 68060 mit FPU, AmigaOS 3.2,
+RTG mit 24/32 Bit, mindestens 128 MB RAM. Anleitung: Guide.html im
+Archiv (IBrowse, AWeb, Voyager).
+
+Hinweis zur Uploader-Adresse: sie steht ohne @ und ohne Punkt da, damit
+Adresssammler nichts davon haben. Ein @ vor "gmail", ein Punkt vor
+"com", fertig.
