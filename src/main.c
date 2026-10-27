@@ -2156,16 +2156,18 @@ int main(int argc, char **argv)
 {
     LONG dw = 1280, dh = 960;
     const char *loadpath = NULL;
+    LONG nfiles = 0;
 
-    if (argc == 2)
-        loadpath = argv[1];
-    else if (argc == 3) {
+    if (argc == 3 && argv[1][0] >= '0' && argv[1][0] <= '9') {
         dw = atol(argv[1]);
         dh = atol(argv[2]);
         if (dw < 16) dw = 16;
         if (dh < 16) dh = 16;
         if (dw > 8000) dw = 8000;
         if (dh > 8000) dh = 8000;
+    } else if (argc >= 2) {
+        loadpath = argv[1];     /* eine oder mehrere Dateien */
+        nfiles = argc - 1;
     }
 
     IntuitionBase = (struct IntuitionBase *)OpenLibrary("intuition.library", 39);
@@ -2249,8 +2251,11 @@ int main(int argc, char **argv)
         extern void perf_run(void);
         perf_run();
         quit = TRUE;
-    } else if (loadpath)
-        open_file(loadpath);
+    } else if (loadpath) {
+        LONG i;
+        for (i = 1; i <= nfiles; i++)
+            open_file(argv[i]);
+    }
 
     while (!quit) {
         ULONG winsig = 1UL << win->UserPort->mp_SigBit;

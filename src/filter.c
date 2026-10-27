@@ -1031,8 +1031,11 @@ static BOOL quant_dialog(void (*prev)(void))
     };
     LONG i;
     BOOL ok;
-    /* Vorgabe aus New Document (Farbtiefe des Dokuments) */
-    if (doc->colors && !doc->qpal) {
+    /* Vorgabe: letzte Reduktion dieses Dokuments, sonst Farbtiefe aus New Document */
+    if (doc->qpal) {
+        for (i = 0; i < 6; i++)
+            v[i] = doc->qopt[i];
+    } else if (doc->colors) {
         v[1] = doc->colors == -6 ? QM_HAM6 : doc->colors == -8 ? QM_HAM8 : doc->colors == 64 ? QM_EHB : QM_NORMAL;
         if (doc->colors > 0)
             v[2] = doc->colors;

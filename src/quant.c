@@ -348,6 +348,26 @@ out:
 static const ULONG magicwb[8] = {
     0x959595, 0x000000, 0xFFFFFF, 0x3B67A2, 0x7B7B7B, 0xAFAFAF, 0xAA907C, 0xFFA997 };
 
+static UWORD *cache;            /* naechster Index + 1 je 6-Bit-Farbe */
+
+static LONG nearest(const QPalette *pal, LONG r, LONG g, LONG b, LONG n)
+{
+    LONG key = ((r >> 2) << 12) | ((g >> 2) << 6) | (b >> 2), k, best = 0, bd = 0x7FFFFFFF;
+    if (cache && cache[key])
+        return cache[key] - 1;
+    for (k = 0; k < n; k++) {
+        ULONG v = pal->col[k];
+        LONG d = dist(r, g, b, (v >> 16) & 0xFF, (v >> 8) & 0xFF, v & 0xFF);
+        if (d < bd) {
+            bd = d;
+            best = k;
+        }
+    }
+    if (cache)
+        cache[key] = (UWORD)(best + 1);
+    return best;
+}
+
 /* HAM: bis zu 4 Moeglichkeiten fuer Ziel (r,g,b) nach Vorgaenger (pr,pg,pb):
  * beste Palettenfarbe, oder R/G/B des Vorgaengers aendern. Rueckgabe Anzahl. */
 typedef struct { LONG r, g, b, code, d; } HamOpt;
@@ -355,17 +375,9 @@ typedef struct { LONG r, g, b, code, d; } HamOpt;
 static LONG ham_options(const QPalette *pal, LONG nbase, LONG r, LONG g, LONG b,
                         LONG pr, LONG pg, LONG pb, HamOpt *o)
 {
-    LONG k, best = 0, bd = 0x7FFFFFFF, n = 0, v;
-    for (k = 0; k < nbase; k++) {
-        ULONG c = pal->col[k];
-        LONG d = dist(r, g, b, (c >> 16) & 0xFF, (c >> 8) & 0xFF, c & 0xFF);
-        if (d < bd) {
-            bd = d;
-            best = k;
-        }
-    }
+    LONG k, best = nearest(pal, r, g, b, nbase), n = 0, v;
     o[n].r = (pal->col[best] >> 16) & 0xFF; o[n].g = (pal->col[best] >> 8) & 0xFF;
-    o[n].b = pal->col[best] & 0xFF; o[n].code = best; o[n].d = bd; n++;
+    o[n].b = pal->col[best] & 0xFF; o[n].code = best; o[n].d = dist(r, g, b, o[n].r, o[n].g, o[n].b); n++;
     if (pal->mode == QM_HAM6) {
         LONG qr = (r * 15 + 127) / 255, qg = (g * 15 + 127) / 255, qb = (b * 15 + 127) / 255;
         o[n].r = qr * 17; o[n].g = pg; o[n].b = pb; o[n].code = 0x20 | qr; n++;
@@ -402,6 +414,7 @@ static double ham_trial(const ULONG *px, LONG w, LONG h, const QPalette *pal, UL
     double sum = 0;
     HamOpt op[4];
     *nbad = 0;
+    cache = calloc(1 << 18, sizeof(UWORD));     /* darf fehlen: dann ohne */
     for (y = 0; y < h; y++) {
         LONG pr = (pal->col[0] >> 16) & 0xFF, pg = (pal->col[0] >> 8) & 0xFF, pb = pal->col[0] & 0xFF;
         for (x = 0; x < w; x++) {
@@ -419,6 +432,8 @@ static double ham_trial(const ULONG *px, LONG w, LONG h, const QPalette *pal, UL
             pr = op[bi].r; pg = op[bi].g; pb = op[bi].b;
         }
     }
+    free(cache);
+    cache = NULL;
     return sum;
 }
 
@@ -534,26 +549,6 @@ LONG quant_planes(const QPalette *pal)
 
 /* ---- Abbilden ---- */
 
-static UWORD *cache;            /* naechster Index + 1 je 6-Bit-Farbe */
-
-static LONG nearest(const QPalette *pal, LONG r, LONG g, LONG b, LONG n)
-{
-    LONG key = ((r >> 2) << 12) | ((g >> 2) << 6) | (b >> 2), k, best = 0, bd = 0x7FFFFFFF;
-    if (cache && cache[key])
-        return cache[key] - 1;
-    for (k = 0; k < n; k++) {
-        ULONG v = pal->col[k];
-        LONG d = dist(r, g, b, (v >> 16) & 0xFF, (v >> 8) & 0xFF, v & 0xFF);
-        if (d < bd) {
-            bd = d;
-            best = k;
-        }
-    }
-    if (cache)
-        cache[key] = (UWORD)(best + 1);
-    return best;
-}
-
 static const UBYTE bayer8[64] = {
      0, 32,  8, 40,  2, 34, 10, 42, 48, 16, 56, 24, 50, 18, 58, 26,
     12, 44,  4, 36, 14, 46,  6, 38, 60, 28, 52, 20, 62, 30, 54, 22,
@@ -579,7 +574,7 @@ BOOL quant_map(ULONG *px, LONG w, LONG h, LONG stride, const QuantOpts *o, const
         spread = ham ? 24 : 255 / (s + 1);
     }
     spread = spread * amt / 100;
-    cache = ham ? NULL : calloc(1 << 18, sizeof(UWORD));
+    cache = calloc(1 << 18, sizeof(UWORD));
     for (x = 0; x < 3; x++)
         err[x] = calloc(ew, sizeof(LONG));
     if (!err[0] || !err[1] || !err[2]) {
