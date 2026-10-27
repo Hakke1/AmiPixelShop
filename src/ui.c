@@ -3,6 +3,7 @@
  */
 #include <exec/types.h>
 #include <string.h>
+#include <stdlib.h>
 #include <stdio.h>
 #include <intuition/intuition.h>
 #include <dos/dos.h>
@@ -1195,9 +1196,172 @@ ULONG ui_prefs_mode(void)
     return pref_mode;
 }
 
+/* ---- File > New: Dokumentvorlagen ---- */
+
+typedef struct { const char *name; LONG w, h, colors; } NPreset;
+
+/* nur Groessen bis etwa Full HD (Speicher) */
+static const NPreset np_photo[] = {
+    { "Landscape 4 x 6", 1800, 1200, 0 }, { "Portrait 4 x 6", 1200, 1800, 0 },
+    { "Landscape 5 x 7", 1500, 1050, 0 }, { "Square", 1500, 1500, 0 },
+    { "Landscape 3 x 2", 1620, 1080, 0 }, { "Portrait 2 x 3", 1080, 1620, 0 } };
+static const NPreset np_print[] = {
+    { "A5 @ 150 ppi", 874, 1240, 0 }, { "A6 Postcard @ 150 ppi", 620, 874, 0 },
+    { "A4 @ 120 ppi", 992, 1403, 0 }, { "Letter @ 120 ppi", 1020, 1320, 0 },
+    { "Business Card @ 300 ppi", 1050, 600, 0 }, { "Square Flyer @ 150 ppi", 1200, 1200, 0 } };
+static const NPreset np_web[] = {
+    { "Web Large", 1920, 1080, 0 }, { "Web Medium", 1366, 768, 0 },
+    { "Web Small", 1024, 768, 0 }, { "Social Square", 1080, 1080, 0 },
+    { "Social Banner", 1200, 628, 0 }, { "Icon", 512, 512, 0 } };
+static const NPreset np_mobile[] = {
+    { "Phone Portrait", 1080, 1920, 0 }, { "Phone Landscape", 1920, 1080, 0 },
+    { "Story", 1080, 1920, 0 }, { "Small Phone", 750, 1334, 0 },
+    { "Tablet Landscape", 1366, 1024, 0 }, { "App Icon", 1024, 1024, 0 } };
+static const NPreset np_film[] = {
+    { "HDTV 1080p", 1920, 1080, 0 }, { "HDTV 720p", 1280, 720, 0 },
+    { "PAL D1/DV", 720, 576, 0 }, { "NTSC D1", 720, 480, 0 },
+    { "PAL Widescreen", 1024, 576, 0 }, { "NTSC Widescreen", 854, 480, 0 } };
+static const NPreset np_amiga[] = {
+    { "PAL Lowres", 320, 256, 32 }, { "PAL Lowres EHB", 320, 256, 64 },
+    { "PAL Lowres HAM6", 320, 256, -6 }, { "PAL Hires", 640, 256, 16 },
+    { "PAL Hires Laced", 640, 512, 16 }, { "PAL Overscan", 368, 283, 32 },
+    { "NTSC Lowres", 320, 200, 32 }, { "NTSC Hires", 640, 200, 16 },
+    { "NTSC Hires Laced", 640, 400, 16 }, { "Super-Hires Laced", 1280, 512, 4 },
+    { "Productivity", 640, 480, 4 }, { "AGA Lowres", 320, 256, 256 },
+    { "AGA Hires Laced", 640, 512, 256 }, { "AGA HAM8", 640, 512, -8 },
+    { "Workbench Icon", 64, 64, 256 }, { "RTG 800 x 600", 800, 600, 0 } };
+
+#define NP_MAXUSER 8
+static NPreset np_recent[NP_MAXUSER], np_saved[NP_MAXUSER];
+static char np_rname[NP_MAXUSER][40], np_sname[NP_MAXUSER][40];
+static LONG np_nrecent, np_nsaved;
+
+static const char *np_tabs[8] = { "Recent", "Photo", "Print", "Web", "Mobile", "Film & Video", "Amiga", "Saved" };
+static const LONG np_depths[11] = { 0, 2, 4, 8, 16, 32, 64, 128, 256, -6, -8 };
+static const char *np_bgs[4] = { "White", "Black", "Background Color", "Transparent" };
+
+void color_depth_name(LONG c, char *buf)
+{
+    if (!c)
+        strcpy(buf, "RGB/8");
+    else if (c == -6)
+        strcpy(buf, "HAM6");
+    else if (c == -8)
+        strcpy(buf, "HAM8");
+    else if (c == 64)
+        strcpy(buf, "EHB");
+    else
+        sprintf(buf, "%ld colors", (long)c);
+}
+
+static void np_label(LONG c, char *buf)
+{
+    if (!c)
+        strcpy(buf, "RGB Color, 8 bit");
+    else if (c == -6)
+        strcpy(buf, "Amiga HAM6 (4096 colors)");
+    else if (c == -8)
+        strcpy(buf, "Amiga HAM8 (262144 colors)");
+    else if (c == 64)
+        strcpy(buf, "Amiga EHB (64 colors)");
+    else
+        sprintf(buf, "Amiga %ld colors", (long)c);
+}
+
+static const NPreset *np_list(LONG tab, LONG *n)
+{
+    switch (tab) {
+    case 0: *n = np_nrecent; return np_recent;
+    case 1: *n = 6; return np_photo;
+    case 2: *n = 6; return np_print;
+    case 3: *n = 6; return np_web;
+    case 4: *n = 6; return np_mobile;
+    case 5: *n = 6; return np_film;
+    case 6: *n = 16; return np_amiga;
+    }
+    *n = np_nsaved;
+    return np_saved;
+}
+
+/* Prefs: "recent=Name|W|H|C;..." und "saved=..." */
+static void np_parse(const char *p, NPreset *list, char (*names)[40], LONG *n)
+{
+    *n = 0;
+    while (*p && *p != '\n' && *n < NP_MAXUSER) {
+        LONG k = 0, w, h, c;
+        char *e;
+        while (*p && *p != '|' && *p != '\n' && k < 39)
+            names[*n][k++] = *p++;
+        names[*n][k] = 0;
+        if (*p != '|')
+            break;
+        w = strtol(p + 1, &e, 10);
+        if (*e != '|')
+            break;
+        h = strtol(e + 1, &e, 10);
+        if (*e != '|')
+            break;
+        c = strtol(e + 1, &e, 10);
+        if (w >= 1 && h >= 1 && w <= 16000 && h <= 16000) {
+            list[*n].name = names[*n];
+            list[*n].w = w;
+            list[*n].h = h;
+            list[*n].colors = c;
+            (*n)++;
+        }
+        p = *e == ';' ? e + 1 : e;
+    }
+}
+
+static void np_write(char *buf, const char *key, const NPreset *list, LONG n)
+{
+    LONG i;
+    strcat(buf, key);
+    for (i = 0; i < n; i++)
+        sprintf(buf + strlen(buf), "%s%s|%ld|%ld|%ld", i ? ";" : "", list[i].name,
+                (long)list[i].w, (long)list[i].h, (long)list[i].colors);
+    strcat(buf, "\n");
+}
+
+static void np_load(const char *prefs)
+{
+    const char *p;
+    if ((p = strstr(prefs, "recent=")))
+        np_parse(p + 7, np_recent, np_rname, &np_nrecent);
+    if ((p = strstr(prefs, "saved=")))
+        np_parse(p + 6, np_saved, np_sname, &np_nsaved);
+}
+
+/* vorne einfuegen (gleiche Groesse/Farbtiefe nur einmal) */
+static void np_push(NPreset *list, char (*names)[40], LONG *n, const char *name, LONG w, LONG h, LONG c)
+{
+    LONG i, j;
+    char nm[40];
+    strncpy(nm, name, 39);
+    nm[39] = 0;
+    for (i = 0; i < *n; i++)
+        if (list[i].w == w && list[i].h == h && list[i].colors == c && !strcmp(list[i].name, nm))
+            break;
+    if (i == *n) {
+        if (*n < NP_MAXUSER)
+            (*n)++;
+        i = *n - 1;
+    }
+    for (j = i; j > 0; j--) {
+        strcpy(names[j], names[j - 1]);
+        list[j] = list[j - 1];
+        list[j].name = names[j];
+    }
+    strcpy(names[0], nm);
+    list[0].name = names[0];
+    list[0].w = w;
+    list[0].h = h;
+    list[0].colors = c;
+}
+
 void ui_prefs_load(void)
 {
-    char buf[512];
+    char buf[4096];
     BPTR fh;
     LONG i, n;
     for (i = 0; i < T_COUNT; i++)
@@ -1225,6 +1389,7 @@ void ui_prefs_load(void)
             }
         }
     }
+    np_load(buf);
     move_autosel = strstr(buf, "autosel=1") != NULL;
     move_autogroup = strstr(buf, "autogroup=1") != NULL;
     for (i = 0; i < T_COUNT && !tool_visible[i]; i++)
@@ -1236,7 +1401,7 @@ void ui_prefs_load(void)
 void ui_prefs_save(void)
 {
     static const char *files[2] = { "ENV:AmiPixelShop.prefs", "ENVARC:AmiPixelShop.prefs" };
-    char buf[1024];
+    char buf[4096];
     LONG i, k;
     strcpy(buf, "hide=");
     for (i = 0; i < T_COUNT; i++)
@@ -1249,6 +1414,10 @@ void ui_prefs_save(void)
     if (pref_mode != 0xFFFFFFFF)
         sprintf(buf + strlen(buf), "mode=0x%08lx\n", (unsigned long)pref_mode);
     sprintf(buf + strlen(buf), "autosel=%ld\nautogroup=%ld\n", (long)move_autosel, (long)move_autogroup);
+    if (np_nrecent)
+        np_write(buf, "recent=", np_recent, np_nrecent);
+    if (np_nsaved)
+        np_write(buf, "saved=", np_saved, np_nsaved);
     for (k = 0; k < 2; k++) {
         BPTR fh = Open(files[k], MODE_NEWFILE);
         if (fh) {
@@ -2369,9 +2538,15 @@ void ui_draw_tab(void)
     for (i = 0; i < ndocs; i++) {
         Doc *d = docs[i];
         LONG w;
-        if (d == doc)
-            sprintf(buf, "%s%s @ %s (%s, %s/8)", doc_title_of(d), d->modified ? "*" : "",
-                    z, d->layers[d->active]->name, doc_target_is_mask() ? "Layer Mask" : "RGB");
+        if (d == doc) {
+            char cd[24];
+            if (d->colors && !doc_target_is_mask())
+                color_depth_name(d->colors, cd);
+            else
+                strcpy(cd, doc_target_is_mask() ? "Layer Mask/8" : "RGB/8");
+            sprintf(buf, "%s%s @ %s (%s, %s)", doc_title_of(d), d->modified ? "*" : "",
+                    z, d->layers[d->active]->name, cd);
+        }
         else
             sprintf(buf, "%s%s", doc_title_of(d), d->modified ? "*" : "");
         w = text_width(buf) + 40;
@@ -4468,4 +4643,295 @@ BOOL ui_edit_text(LONG x, LONG y, LONG w, char *buf, LONG max)
 const char *ui_tool_name(LONG t)
 {
     return tool_names[t];
+}
+
+/* Geometrie */
+static LONG nd_x0, nd_y0, nd_w, nd_h, nd_tab, nd_sel, nd_cols, nd_rows, nd_px;
+static LONG nd_tabx[9];
+static NewDocSpec *nd_s;
+static char nd_preset[40];      /* Name der gewaehlten Vorlage (fuer Recent) */
+#define ND_CW 132
+#define ND_CH 92
+
+static void nd_field(LONG x, LONG y, LONG w, const char *s, BOOL dropdown)
+{
+    fill(x, y, w, 24, COL_FIELD);
+    frame(x, y, w, 24, COL_LINE);
+    gfx_clip(x, y, x + w - (dropdown ? 18 : 4), y + 24);
+    text(x + 8, y + 3, s, COL_TEXT);
+    gfx_noclip();
+    if (dropdown)
+        down_arrow(x + w - 13, y + 10, COL_DIM);
+}
+
+static void nd_draw(void)
+{
+    LONG i, n, x, y, px = nd_px;
+    const NPreset *pl = np_list(nd_tab, &n);
+    char buf[64];
+    gfx_noclip();
+    fill(nd_x0, nd_y0, nd_w, nd_h, COL_BAR);
+    frame(nd_x0, nd_y0, nd_w, nd_h, COL_LINE);
+    text_bold(nd_x0 + 16, nd_y0 + 10, "New Document", COL_TEXT);
+    fill(nd_x0 + 12, nd_y0 + 34, nd_w - 24, 1, COL_LINE);
+    /* Reiter */
+    x = nd_x0 + 16;
+    for (i = 0; i < 8; i++) {
+        LONG w = text_width(np_tabs[i]);
+        nd_tabx[i] = x;
+        text(x, nd_y0 + 46, np_tabs[i], i == nd_tab ? COL_TEXT : COL_DIM);
+        if (i == nd_tab)
+            fill(x, nd_y0 + 46 + FONT_H + 3, w, 2, COL_TEXT);
+        x += w + 22;
+    }
+    nd_tabx[8] = x;
+    fill(nd_x0 + 12, nd_y0 + 74, nd_w - 24, 1, COL_LINE);
+    /* Vorlagen */
+    sprintf(buf, "%s PRESETS (%ld)", nd_tab == 6 ? "AMIGA" : nd_tab == 0 ? "RECENT" : nd_tab == 7 ? "SAVED" : "BLANK DOCUMENT",
+            (long)n);
+    text(nd_x0 + 16, nd_y0 + 84, buf, COL_DIM);
+    if (!n)
+        text(nd_x0 + 16, nd_y0 + 112, nd_tab == 7 ? "No saved presets yet - use Save Preset."
+                                                  : "No recent documents yet.", COL_DIM);
+    for (i = 0; i < n && i < nd_cols * nd_rows; i++) {
+        LONG cx = nd_x0 + 16 + (i % nd_cols) * (ND_CW + 8), cy = nd_y0 + 108 + (i / nd_cols) * (ND_CH + 8);
+        LONG iw, ih;
+        BOOL on = i == nd_sel;
+        fill(cx, cy, ND_CW, ND_CH, on ? 0xFF5A5A5A : COL_PANEL);
+        frame(cx, cy, ND_CW, ND_CH, on ? COL_ACCENT : COL_LINE);
+        if (on)
+            frame(cx + 1, cy + 1, ND_CW - 2, ND_CH - 2, COL_ACCENT);
+        /* Seitenverhaeltnis */
+        if (pl[i].w >= pl[i].h) {
+            iw = 30;
+            ih = 30 * pl[i].h / pl[i].w;
+        } else {
+            ih = 30;
+            iw = 30 * pl[i].w / pl[i].h;
+        }
+        if (ih < 4) ih = 4;
+        if (iw < 4) iw = 4;
+        frame(cx + (ND_CW - iw) / 2, cy + 10 + (30 - ih) / 2, iw, ih, 0xFFD0D0D0);
+        gfx_clip(cx + 4, cy, cx + ND_CW - 4, cy + ND_CH);
+        text(cx + (ND_CW - text_width(pl[i].name)) / 2, cy + 46, pl[i].name, COL_TEXT);
+        if (pl[i].colors) {
+            char cd[24];
+            color_depth_name(pl[i].colors, cd);
+            sprintf(buf, "%ld x %ld, %s", (long)pl[i].w, (long)pl[i].h, cd);
+        } else
+            sprintf(buf, "%ld x %ld px", (long)pl[i].w, (long)pl[i].h);
+        text(cx + (ND_CW - text_width(buf)) / 2, cy + 66, buf, COL_DIM);
+        gfx_noclip();
+    }
+    /* Details */
+    y = nd_y0 + 84;
+    text(px, y, "PRESET DETAILS", COL_DIM);
+    nd_field(px, y + 22, 268, nd_s->name, FALSE);
+    text(px, y + 58, "Width", COL_DIM);
+    sprintf(buf, "%ld", (long)nd_s->w);
+    nd_field(px, y + 78, 110, buf, FALSE);
+    text(px + 120, y + 81, "Pixels", COL_DIM);
+    text(px, y + 112, "Height", COL_DIM);
+    sprintf(buf, "%ld", (long)nd_s->h);
+    nd_field(px, y + 132, 110, buf, FALSE);
+    text(px + 120, y + 135, "Orientation", COL_DIM);
+    /* Hoch / Quer */
+    button(px + 206, y + 132, 26, 24, "", nd_s->h > nd_s->w);
+    frame(px + 214, y + 137, 10, 14, COL_TEXT);
+    button(px + 236, y + 132, 26, 24, "", nd_s->w >= nd_s->h);
+    frame(px + 242, y + 140, 14, 10, COL_TEXT);
+    text(px, y + 166, "Resolution", COL_DIM);
+    sprintf(buf, "%ld", (long)nd_s->ppi);
+    nd_field(px, y + 186, 110, buf, FALSE);
+    text(px + 120, y + 189, "Pixels/Inch", COL_DIM);
+    text(px, y + 220, "Color Mode", COL_DIM);
+    np_label(nd_s->colors, buf);
+    nd_field(px, y + 240, 268, buf, TRUE);
+    text(px, y + 274, "Background Contents", COL_DIM);
+    nd_field(px, y + 294, 232, np_bgs[nd_s->bg], TRUE);
+    if (nd_s->bg == 3) {
+        LONG k, j;
+        for (j = 0; j < 4; j++)
+            for (k = 0; k < 4; k++)
+                fill(px + 242 + k * 6, y + 294 + j * 6, 6, 6, (j + k) & 1 ? 0xFFCCCCCC : 0xFFFFFFFF);
+    } else
+        fill(px + 242, y + 294, 24, 24, nd_s->bg == 0 ? 0xFFFFFFFF : nd_s->bg == 1 ? 0xFF000000 : 0xFF000000 | bg_color);
+    frame(px + 242, y + 294, 24, 24, COL_LINE);
+    button(px, y + 336, 268, 26, "Save Preset...", FALSE);
+    /* Knoepfe */
+    button(nd_x0 + nd_w - 216, nd_y0 + nd_h - 42, 96, 28, "Close", FALSE);
+    fill(nd_x0 + nd_w - 112, nd_y0 + nd_h - 42, 96, 28, COL_ACCENT);
+    frame(nd_x0 + nd_w - 112, nd_y0 + nd_h - 42, 96, 28, COL_LINE);
+    text(nd_x0 + nd_w - 112 + (96 - text_width("Create")) / 2, nd_y0 + nd_h - 37, "Create", 0xFFFFFFFF);
+}
+
+static void nd_pick(const NPreset *p)
+{
+    strncpy(nd_preset, p->name, sizeof(nd_preset) - 1);
+    nd_s->w = p->w;
+    nd_s->h = p->h;
+    nd_s->colors = p->colors;
+    if (p->colors && nd_s->ppi > 100)
+        nd_s->ppi = 72;
+}
+
+/* Zahl in einem Feld bearbeiten */
+static void nd_edit_num(LONG x, LONG y, LONG *v, LONG lo, LONG hi)
+{
+    char buf[16];
+    BOOL ok;
+    LONG n;
+    sprintf(buf, "%ld", (long)*v);
+    if (!ui_edit_text(x, y, 110, buf, sizeof(buf)))
+        return;
+    n = parse_value(buf, 1, &ok);
+    if (ok)
+        *v = n < lo ? lo : n > hi ? hi : n;
+}
+
+BOOL ui_new_document(NewDocSpec *s)
+{
+    BOOL done = FALSE, ok = FALSE, changed = TRUE;
+    char prefs[4096];
+    BPTR fh;
+    LONG n;
+    nd_s = s;
+    /* Recent/Saved aus den Prefs */
+    if ((fh = Open("ENV:AmiPixelShop.prefs", MODE_OLDFILE))) {
+        n = Read(fh, prefs, sizeof(prefs) - 1);
+        Close(fh);
+        prefs[n > 0 ? n : 0] = 0;
+        np_load(prefs);
+    }
+    if (!s->ppi)
+        s->ppi = 72;
+    sprintf(s->name, "Untitled-%ld", (long)doc_next_untitled());
+    strcpy(nd_preset, "Custom");
+    nd_tab = np_nrecent ? 0 : 6;
+    nd_sel = -1;
+    nd_cols = 4;
+    nd_w = 16 + nd_cols * (ND_CW + 8) + 16 + 268 + 16;
+    nd_h = 108 + 4 * (ND_CH + 8) + 60;
+    if (nd_h > SH - MENU_H - 8) {
+        nd_rows = (SH - MENU_H - 8 - 168) / (ND_CH + 8);
+        nd_h = 108 + nd_rows * (ND_CH + 8) + 60;
+    } else
+        nd_rows = 4;
+    if (nd_h < 470)
+        nd_h = 470;
+    nd_x0 = (SW - nd_w) / 2;
+    nd_y0 = MENU_H + (SH - MENU_H - nd_h) / 2;
+    nd_px = nd_x0 + 16 + nd_cols * (ND_CW + 8) + 8;
+    view_overlay_cb = nd_draw;
+
+    while (!done) {
+        struct IntuiMessage *im;
+        if (changed) {
+            nd_draw();
+            blit(nd_x0, nd_y0, nd_w, nd_h);
+        }
+        changed = FALSE;
+        if (Wait((1UL << win->UserPort->mp_SigBit) | SIGBREAKF_CTRL_C) & SIGBREAKF_CTRL_C) {
+            SetSignal(SIGBREAKF_CTRL_C, SIGBREAKF_CTRL_C);
+            done = TRUE;
+        }
+        while (!done && (im = (struct IntuiMessage *)GetMsg(win->UserPort))) {
+            ULONG class = im->Class;
+            UWORD code = im->Code;
+            LONG mx = im->MouseX, my = im->MouseY, i, px = nd_px, y = nd_y0 + 84;
+            ReplyMsg((struct Message *)im);
+            if (class == IDCMP_RAWKEY) {
+                if (code == 0x44 || code == 0x43)
+                    ok = done = TRUE;
+                else if (code == 0x45)
+                    done = TRUE;
+                continue;
+            }
+            if (class != IDCMP_MOUSEBUTTONS || code != SELECTDOWN)
+                continue;
+            changed = TRUE;
+            /* Reiter */
+            if (my >= nd_y0 + 40 && my < nd_y0 + 72) {
+                for (i = 0; i < 8; i++)
+                    if (mx >= nd_tabx[i] && mx < nd_tabx[i] + text_width(np_tabs[i]) + 12) {
+                        nd_tab = i;
+                        nd_sel = -1;
+                    }
+                continue;
+            }
+            /* Vorlagen */
+            if (mx >= nd_x0 + 16 && mx < nd_px - 8 && my >= nd_y0 + 108) {
+                LONG c = (mx - nd_x0 - 16) / (ND_CW + 8), r = (my - nd_y0 - 108) / (ND_CH + 8), k;
+                const NPreset *pl = np_list(nd_tab, &n);
+                k = r * nd_cols + c;
+                if (c < nd_cols && r < nd_rows && k < n) {
+                    nd_sel = k;
+                    nd_pick(&pl[k]);
+                }
+                continue;
+            }
+            /* Details */
+            if (mx >= px && mx < px + 268 && my < y + 366) {
+                if (my >= y + 22 && my < y + 46)
+                    ui_edit_text(px, y + 22, 268, s->name, sizeof(s->name));
+                else if (my >= y + 78 && my < y + 102 && mx < px + 110) {
+                    nd_edit_num(px, y + 78, &s->w, 1, 8000);
+                    nd_sel = -1;
+                    strcpy(nd_preset, "Custom");
+                } else if (my >= y + 132 && my < y + 156 && mx < px + 110) {
+                    nd_edit_num(px, y + 132, &s->h, 1, 8000);
+                    nd_sel = -1;
+                    strcpy(nd_preset, "Custom");
+                } else if (my >= y + 132 && my < y + 156 && mx >= px + 206) {
+                    BOOL portrait = mx < px + 234;
+                    if ((portrait && s->w > s->h) || (!portrait && s->h > s->w)) {
+                        LONG t = s->w;
+                        s->w = s->h;
+                        s->h = t;
+                    }
+                } else if (my >= y + 186 && my < y + 210 && mx < px + 110)
+                    nd_edit_num(px, y + 186, &s->ppi, 1, 1200);
+                else if (my >= y + 240 && my < y + 264) {
+                    const char *items[11];
+                    static char lab[11][40];
+                    LONG cur = 0, r;
+                    for (i = 0; i < 11; i++) {
+                        np_label(np_depths[i], lab[i]);
+                        items[i] = lab[i];
+                        if (np_depths[i] == s->colors)
+                            cur = i;
+                    }
+                    r = ui_popup(px, y + 264, items, 11, cur);
+                    if (r >= 0)
+                        s->colors = np_depths[r];
+                } else if (my >= y + 294 && my < y + 318 && mx < px + 232) {
+                    LONG r = ui_popup(px, y + 318, np_bgs, 4, s->bg);
+                    if (r >= 0)
+                        s->bg = r;
+                } else if (my >= y + 336 && my < y + 362) {
+                    np_push(np_saved, np_sname, &np_nsaved, s->name, s->w, s->h, s->colors);
+                    ui_prefs_save();
+                    nd_tab = 7;
+                    nd_sel = 0;
+                }
+                continue;
+            }
+            /* Close / Create */
+            if (my >= nd_y0 + nd_h - 42 && my < nd_y0 + nd_h - 14) {
+                if (mx >= nd_x0 + nd_w - 216 && mx < nd_x0 + nd_w - 120)
+                    done = TRUE;
+                else if (mx >= nd_x0 + nd_w - 112 && mx < nd_x0 + nd_w - 16)
+                    ok = done = TRUE;
+            }
+        }
+    }
+    if (ok) {
+        np_push(np_recent, np_rname, &np_nrecent, nd_preset, s->w, s->h, s->colors);
+        ui_prefs_save();
+    }
+    view_overlay_cb = NULL;
+    ui_draw_all();
+    view_inval_all();
+    view_flush();
+    return ok;
 }

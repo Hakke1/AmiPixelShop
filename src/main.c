@@ -1322,13 +1322,32 @@ void do_command(LONG c)
         after_edit();
         break;
     case CMD_NEW: {
-        static LONG nw = 800, nh = 600;
+        static NewDocSpec ns = { "", 1920, 1080, 72, 0, 0 };
         Doc *d;
-        if (!size_dialog("New", &nw, &nh, 0, 0, NULL, NULL))
+        if (!ui_new_document(&ns))
             break;
-        if ((d = doc_new(nw, nh, DOC_WHITE)))
+        if ((d = doc_new(ns.w, ns.h, DOC_EMPTY))) {
+            Layer *l = d->layers[0];
+            LONG i, k;
+            if (ns.bg == 3)
+                strcpy(l->name, "Layer 1");     /* transparent: normale Ebene */
+            else {
+                ULONG c = ns.bg == 0 ? 0xFFFFFFFF : ns.bg == 1 ? 0xFF000000 : 0xFF000000 | bg_color;
+                for (i = 0; i < d->tw * d->th; i++) {
+                    Tile *t = tile_new();
+                    if (!t)
+                        break;
+                    for (k = 0; k < TILE_PIX; k++)
+                        t->px[k] = c;
+                    tile_update_flag(d, t, i % d->tw, i / d->tw);
+                    l->tiles[i] = t;
+                }
+            }
+            strncpy(d->name, ns.name, sizeof(d->name) - 1);
+            d->colors = ns.colors;
+            d->ppi = ns.ppi;
             switch_doc(d);
-        else
+        } else
             request("Not enough memory", "OK");
         break; }
     case CMD_OPEN:

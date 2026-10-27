@@ -150,6 +150,9 @@ typedef struct Doc {
     BOOL vset;
     LONG untitled;              /* "Unbenannt-N" */
     char title[40];
+    char name[40];              /* Name aus New Document (bis zum ersten Speichern) */
+    LONG colors;                /* Zielfarbtiefe: 0 = RGB, sonst Farben; -6/-8 = HAM6/HAM8 */
+    LONG ppi;                   /* Aufloesung (nur Angabe) */
     struct Doc *size_prev;      /* Zustand vor Bildgroesse/Arbeitsflaeche/Freistellen (Undo) */
     struct Doc *size_next;      /* ... und danach (Redo) */
     char base_name[32];         /* erster Protokolleintrag, z. B. "Crop"; leer = Open/New */
@@ -577,6 +580,13 @@ void ui_hover(LONG x, LONG y);
 void ui_tick(void);
 void ui_hover_hide(void);
 BOOL ui_right_click(LONG x, LONG y);
+typedef struct {
+    char name[40];
+    LONG w, h, ppi, colors, bg;     /* bg: 0 White, 1 Black, 2 Background Color, 3 Transparent */
+} NewDocSpec;
+BOOL ui_new_document(NewDocSpec *s);
+LONG doc_next_untitled(void);
+void color_depth_name(LONG colors, char *buf);
 BOOL size_dialog(const char *title, LONG *w, LONG *h, LONG ow, LONG oh, BOOL *lock, LONG *anchor);
 BOOL doc_image_size(LONG nw, LONG nh);
 BOOL doc_canvas_size(LONG nw, LONG nh, LONG anchor);

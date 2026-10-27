@@ -593,6 +593,11 @@ Doc *docs[MAX_DOCS];
 LONG ndocs;
 static LONG untitled_counter;
 
+LONG doc_next_untitled(void)
+{
+    return untitled_counter + 1;
+}
+
 LONG doc_index(Doc *d)
 {
     LONG i;
@@ -647,6 +652,8 @@ void doc_close(Doc *d)
 const char *doc_title_of(Doc *d)
 {
     const char *p = d->path, *q;
+    if (!*p && d->name[0])
+        return d->name;
     if (!*p) {
         sprintf(d->title, "Untitled-%ld", (long)d->untitled);
         return d->title;

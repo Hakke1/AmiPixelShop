@@ -48,6 +48,7 @@ struct Library *DataTypesBase;
 #define TAG_OVF  0x4F564620 /* "OVF ": x, y, w, h, zlib-Laenge, zlib(ARGB) */
 #define TAG_MOVF 0x4D4F5646 /* "MOVF": wie OVF, Ueberhang der Maske */
 #define TAG_PATH 0x50415448 /* "PATH": nach der letzten Ebene, Arbeitspfad */
+#define TAG_AMIG 0x414D4947 /* "AMIG": Farbtiefe und Aufloesung des Dokuments */
 
 /* Kachel -> 4 Kanalebenen mit Differenzfilter */
 static void tile_encode(const ULONG *px, UBYTE *out)
@@ -503,10 +504,14 @@ static Doc *load_aps(const char *path, char *err)
     }
     d->active = hdr[5] < (ULONG)d->nlayers ? (LONG)hdr[5] : d->nlayers - 1;
     {
-        /* Arbeitspfad, falls vorhanden */
-        ULONG tag, len, np, ns, v[2];
+        /* Bloecke hinter den Ebenen: Dokument-Angaben, Arbeitspfad */
+        ULONG tag = 0, len, np, ns, v[2];
         Path *p;
-        if (rd32(fh, &tag) && tag == TAG_PATH && rd32(fh, &len) && rd32(fh, &np) && rd32(fh, &ns) &&
+        while (rd32(fh, &tag) && tag == TAG_AMIG && rd32(fh, &len) && len == 8 && rd(fh, v, 8)) {
+            d->colors = (LONG)v[0];
+            d->ppi = (LONG)v[1];
+        }
+        if (tag == TAG_PATH && rd32(fh, &len) && rd32(fh, &np) && rd32(fh, &ns) &&
             np <= PATH_MAXPTS && ns <= PATH_MAXSUB && (p = AllocVec(sizeof(Path), MEMF_ANY | MEMF_CLEAR))) {
             BOOL ok = TRUE;
             p->npts = np;
@@ -590,7 +595,11 @@ static BOOL save_aps(Doc *d, const char *path, char *err)
         if (!write_chunks(fh, d, l))
             goto out;
     }
-    /* Arbeitspfad (aeltere Versionen lesen hinter den Ebenen nichts mehr) */
+    /* Dokument-Angaben (aeltere Versionen lesen hinter den Ebenen nichts mehr) */
+    if ((d->colors || d->ppi) &&
+        (!wr32(fh, TAG_AMIG) || !wr32(fh, 8) || !wr32(fh, d->colors) || !wr32(fh, d->ppi)))
+        goto out;
+    /* Arbeitspfad */
     if (d->wpath && d->wpath->npts) {
         Path *p = d->wpath;
         LONG len = 8 + p->nsub * 8 + p->npts * sizeof(PathPt);
