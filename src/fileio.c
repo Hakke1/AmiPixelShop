@@ -52,6 +52,7 @@ struct Library *DataTypesBase;
 #define TAG_AMIG 0x414D4947 /* "AMIG": Farbtiefe und Aufloesung des Dokuments */
 #define TAG_QPAL 0x5150414C /* "QPAL": Palette der letzten Farbreduktion */
 #define TAG_FPAL 0x4650414C /* "FPAL": vorgegebene Palette (Fixed) */
+#define TAG_GENI 0x47454E49 /* "GENI": generative Ebene: ULONG mode, Prompt (UTF-8, 0-terminiert) */
 
 /* Kachel -> 4 Kanalebenen mit Differenzfilter */
 static void tile_encode(const ULONG *px, UBYTE *out)
@@ -301,6 +302,14 @@ static BOOL write_chunks(BPTR fh, Doc *d, Layer *l)
         return FALSE;
     if (l->clip && (!wr32(fh, TAG_CLIP) || !wr32(fh, 0)))
         return FALSE;
+    if (l->gen) {
+        LONG pl = (strlen(l->gen->prompt) + 4) & ~3;    /* mit 0, auf 4 Bytes */
+        char pb[204];
+        memset(pb, 0, sizeof(pb));
+        strcpy(pb, l->gen->prompt);
+        if (!wr32(fh, TAG_GENI) || !wr32(fh, 4 + pl) || !wr32(fh, l->gen->mode) || !wr(fh, pb, pl))
+            return FALSE;
+    }
     if (l->adj && (!wr32(fh, TAG_ADJ) || !wr32(fh, sizeof(AdjInfo)) || !wr(fh, l->adj, sizeof(AdjInfo))))
         return FALSE;
     if ((l->fill != 255 || l->lock) &&
@@ -376,6 +385,18 @@ static BOOL read_chunks(BPTR fh, Doc *d, Layer *l, char *err)
             free(raw);
         } else if (tag == TAG_CLIP && len == 0) {
             l->clip = 1;
+        } else if (tag == TAG_GENI && len >= 8 && len <= 4 + 200) {
+            ULONG mode;
+            GenInfo *g = AllocVec(sizeof(GenInfo), MEMF_ANY | MEMF_CLEAR);
+            if (!g || !rd32(fh, &mode) || !rd(fh, g->prompt, len - 4)) {
+                if (g) FreeVec(g);
+                break;
+            }
+            g->prompt[sizeof(g->prompt) - 1] = 0;
+            g->mode = mode <= GEN_EXTEND ? (LONG)mode : GEN_FILL;
+            if (l->gen)
+                ai_gen_free(l->gen);
+            l->gen = g;
         } else if (tag == TAG_KIND && len == 16) {
             ULONG v[4];
             if (!rd(fh, v, 16))

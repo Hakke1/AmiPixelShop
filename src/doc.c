@@ -154,6 +154,7 @@ void layer_free(Layer *l, Doc *d)
     LONG i;
     if (!l)
         return;
+    ai_gen_free(l->gen);
     for (i = 0; i < d->tw * d->th; i++)
         if (l->tiles[i])
             FreeVec(l->tiles[i]);

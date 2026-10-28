@@ -64,7 +64,8 @@ static const MenuItem m_edit[] = {
     { "Copy Merged", "Shift+Ctrl+C", CMD_COPY_MERGED },
     { "Paste", "Ctrl+V", CMD_PASTE }, { "Clear", "Del", CMD_ERASE }, SEP,
     { "Fill...", "Shift+F5", CMD_EDIT_FILL }, { "Stroke...", "", CMD_EDIT_STROKE }, SUB("Quick Fill", m_fill), SEP,
-    { "Generative Fill...", "", CMD_GEN_FILL }, { "Generative Remove", "", CMD_GEN_REMOVE }, SEP,
+    { "Generative Fill...", "", CMD_GEN_FILL }, { "Generative Remove", "", CMD_GEN_REMOVE },
+    { "AI Settings...", "", CMD_AI_SETTINGS }, { "AI API Key...", "", CMD_AI_KEY }, SEP,
     { "Free Transform", "Ctrl+T", CMD_FREE_TF }, SUB("Transform", m_transform), SEP,
     { "Toolbar...", "", CMD_TOOLBAR }, { "Screen Mode...", "", CMD_SCREENMODE }, END };
 static const MenuItem m_adjust[] = {
@@ -1406,6 +1407,12 @@ void ui_prefs_load(void)
     move_autosel = strstr(buf, "autosel=1") != NULL;
     move_autogroup = strstr(buf, "autogroup=1") != NULL;
     ai_taskbar = strstr(buf, "taskbar=0") == NULL;
+    {
+        char *q;
+        if ((q = strstr(buf, "aifill=")) && q[7] >= '0' && q[7] <= '2') ai_fill_model = q[7] - '0';
+        if ((q = strstr(buf, "aifast=")) && q[7] >= '0' && q[7] <= '1') ai_fast_model = q[7] - '0';
+        if ((q = strstr(buf, "aivar=")) && q[6] >= '1' && q[6] <= '3') ai_variants = q[6] - '0';
+    }
     for (i = 0; i < T_COUNT && !tool_visible[i]; i++)
         ;
     if (i == T_COUNT)
@@ -1429,6 +1436,8 @@ void ui_prefs_save(void)
         sprintf(buf + strlen(buf), "mode=0x%08lx\n", (unsigned long)pref_mode);
     sprintf(buf + strlen(buf), "autosel=%ld\nautogroup=%ld\ntaskbar=%ld\n", (long)move_autosel,
             (long)move_autogroup, (long)ai_taskbar);
+    sprintf(buf + strlen(buf), "aifill=%ld\naifast=%ld\naivar=%ld\n", (long)ai_fill_model,
+            (long)ai_fast_model, (long)ai_variants);
     if (np_nrecent)
         np_write(buf, "recent=", np_recent, np_nrecent);
     if (np_nsaved)
@@ -2323,6 +2332,31 @@ static LONG pr_layout(LONG y0, BOOL draw)
         pr_button(x, y, 52, "Flip V", CMD_FLIP_V, FALSE, draw);
         y += PR_ROW;
         x = px + 10;
+        if (l->gen) {                   /* generative Ebene: Prompt, Varianten, neu erzeugen */
+            GenInfo *g = l->gen;
+            y += 4;
+            if (draw) {
+                fill(px + 8, y - 4, PANEL_W - 16, 1, COL_LINE);
+                text_bold(x, y + 2, "Generative Layer", COL_TEXT);
+                gfx_clip(x, y + 22, px + PANEL_W - 10, y + 42);
+                text(x, y + 24, g->mode == GEN_REMOVE ? "(Remove)" : g->mode == GEN_EXTEND ? "(Extend)" :
+                     g->prompt, COL_DIM);
+                gfx_noclip();
+            }
+            y += 48;
+            x = pr_button(x, y, 24, "<", CMD_GEN_PREV, FALSE, draw);
+            if (draw) {
+                if (g->nvar)
+                    sprintf(buf, "%ld / %ld", (long)(g->cur + 1), (long)g->nvar);
+                else
+                    strcpy(buf, "-");
+                text(x + (52 - text_width(buf)) / 2, y + 2, buf, COL_TEXT);
+            }
+            x = pr_button(x + 52, y, 24, ">", CMD_GEN_NEXT, FALSE, draw);
+            pr_button(x + 4, y, 118, "Generate again", CMD_GEN_AGAIN, FALSE, draw);
+            y += PR_ROW;
+            x = px + 10;
+        }
     }
 mask:
     x = px + 10;

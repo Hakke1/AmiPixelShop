@@ -22,8 +22,6 @@ void main_activate_doc(Doc *d);
 BOOL crop_active(void);
 
 #define AI_HOST     "openrouter.ai"
-#define AI_MODEL_FAST "google/gemini-3.1-flash-lite-image"    /* Entfernen/Erweitern: ca. 5 s */
-#define AI_MODEL_FILL "google/gemini-nano-banana-2.1"         /* mit Prompt: fuegt Neues besser ein */
 #define AI_MINSIDE  768         /* lange Seite des gesendeten Ausschnitts */
 #define AI_MAXSIDE  1024
 
@@ -46,6 +44,9 @@ typedef struct AiJob {
     UBYTE *sel;                 /* Auswahl im Ausschnitt, w*h */
     BOOL grow;                  /* Entfernen: Maske um vom Modell geaenderte Raender erweitern */
     LONG kind;                  /* AI_FILL, AI_SUBJECT, AI_RMBG */
+    Layer *target;              /* AI_FILL: neue Variante fuer diese generative Ebene, sonst NULL */
+    char prompt[200];
+    LONG mode;                  /* GEN_* */
     Layer *layer;               /* AI_RMBG: Zielebene */
     LONG ix0, iy0, iw, ih, sw, sh;  /* Segmentierung: Bild im gesendeten Rahmen (mit Graubalken) */
     char name[32];              /* Ebenenname */
@@ -54,6 +55,15 @@ typedef struct AiJob {
 
 enum { AI_FILL, AI_SUBJECT, AI_RMBG };
 static AiJob *job;              /* laufende Anfrage oder NULL */
+
+/* Einstellungen (Edit > AI Settings..., gespeichert in den Prefs) */
+static const char *fill_models[] = { "google/gemini-nano-banana-2.1", "google/gemini-3-pro-image",
+                                     "google/gemini-3.1-flash-lite-image" };
+static const char *fast_models[] = { "google/gemini-3.1-flash-lite-image", "google/gemini-nano-banana-2.1" };
+LONG ai_fill_model, ai_fast_model, ai_variants = 1;
+static LONG session_mc;         /* Kosten dieser Sitzung, 1/100 Cent */
+static LONG regen_left;         /* noch zu erzeugende Varianten */
+static Layer *regen_layer;
 static LONG ai_sigbit = -1;
 static char ai_model[96];
 
@@ -86,7 +96,7 @@ static const char *model_name(BOOL fill)
 {
     if (!read_small("ENV:AmiPixelShop/ai_model", ai_model, sizeof(ai_model)) &&
         !read_small("ENVARC:AmiPixelShop/ai_model", ai_model, sizeof(ai_model)))
-        strcpy(ai_model, fill ? AI_MODEL_FILL : AI_MODEL_FAST);
+        strcpy(ai_model, fill ? fill_models[ai_fill_model] : fast_models[ai_fast_model]);
     return ai_model;
 }
 
@@ -540,6 +550,110 @@ static void grow_mask(AiJob *j, const ULONG *gen)
     free(dist);
 }
 
+void ai_gen_free(GenInfo *g)
+{
+    LONG i;
+    if (!g)
+        return;
+    for (i = 0; i < g->nvar; i++)
+        free(g->var[i].px);
+    FreeVec(g);
+}
+
+/* Variante k einer generativen Ebene in deren Pixel schreiben (Maske bleibt) */
+static void gen_show(Layer *l, LONG k)
+{
+    GenInfo *g = l->gen;
+    GenVar *o, *v;
+    LONG x, y, tx, ty;
+    if (!g || k < 0 || k >= g->nvar)
+        return;
+    o = g->cur < g->nvar ? &g->var[g->cur] : NULL;
+    v = &g->var[k];
+    if (o && o->px)                     /* alte Variante leeren */
+        for (ty = o->y >> TILE_SHIFT; ty <= (o->y + o->h - 1) >> TILE_SHIFT; ty++)
+            for (tx = o->x >> TILE_SHIFT; tx <= (o->x + o->w - 1) >> TILE_SHIFT; tx++) {
+                Tile *t = l->tiles[ty * doc->tw + tx];
+                if (!t)
+                    continue;
+                for (y = 0; y < TILE_SIZE; y++) {
+                    LONG dy = (ty << TILE_SHIFT) + y - o->y;
+                    if (dy < 0 || dy >= o->h)
+                        continue;
+                    for (x = 0; x < TILE_SIZE; x++) {
+                        LONG dx = (tx << TILE_SHIFT) + x - o->x;
+                        if (dx >= 0 && dx < o->w)
+                            t->px[(y << TILE_SHIFT) | x] = 0;
+                    }
+                }
+                tile_update_flag(doc, t, tx, ty);
+            }
+    if (v->px)
+        for (ty = v->y >> TILE_SHIFT; ty <= (v->y + v->h - 1) >> TILE_SHIFT; ty++)
+            for (tx = v->x >> TILE_SHIFT; tx <= (v->x + v->w - 1) >> TILE_SHIFT; tx++) {
+                LONG idx = ty * doc->tw + tx;
+                Tile *t = l->tiles[idx];
+                if (!t && !(t = l->tiles[idx] = tile_new()))
+                    continue;
+                for (y = 0; y < TILE_SIZE; y++) {
+                    LONG dy = (ty << TILE_SHIFT) + y - v->y;
+                    if (dy < 0 || dy >= v->h)
+                        continue;
+                    for (x = 0; x < TILE_SIZE; x++) {
+                        LONG dx = (tx << TILE_SHIFT) + x - v->x;
+                        if (dx >= 0 && dx < v->w)
+                            t->px[(y << TILE_SHIFT) | x] = v->px[dy * v->w + dx];
+                    }
+                }
+                tile_update_flag(doc, t, tx, ty);
+            }
+    g->cur = k;
+    doc->modified = TRUE;
+    doc_mark_all_dirty();
+    view_inval_all();
+    ui_draw_panels();
+}
+
+/* Variante blaettern (dir -1/+1) */
+void ai_gen_step(LONG dir)
+{
+    Layer *l = doc->layers[doc->active];
+    GenInfo *g = l->gen;
+    if (!g || g->nvar < 2)
+        return;
+    gen_show(l, (g->cur + dir + g->nvar) % g->nvar);
+}
+
+static void place_variant(AiJob *j, ULONG *gen)
+{
+    Layer *l = NULL;
+    GenInfo *g;
+    LONG i;
+    for (i = 0; i < doc->nlayers; i++)
+        if (doc->layers[i] == j->target)
+            l = j->target;
+    if (!l || !(g = l->gen)) {
+        free(gen);
+        return;
+    }
+    if (g->nvar == GEN_MAXVAR) {        /* voll: aelteste (nicht angezeigte) verwerfen */
+        LONG k = g->cur == 0 ? 1 : 0;
+        free(g->var[k].px);
+        for (i = k; i < GEN_MAXVAR - 1; i++)
+            g->var[i] = g->var[i + 1];
+        g->nvar--;
+        if (g->cur > k)
+            g->cur--;
+    }
+    g->var[g->nvar].x = j->x;
+    g->var[g->nvar].y = j->y;
+    g->var[g->nvar].w = j->w;
+    g->var[g->nvar].h = j->h;
+    g->var[g->nvar].px = gen;
+    g->nvar++;
+    gen_show(l, g->nvar - 1);
+}
+
 static void place_result(AiJob *j)
 {
     UBYTE *rgb;
@@ -634,72 +748,93 @@ static void place_result(AiJob *j)
     if (j->grow)
         grow_mask(j, gen);
 
-    /* neue Ebene ueber der aktiven */
-    if (doc->nlayers >= MAX_LAYERS || !(l = layer_new(doc, j->name))) {
-        free(gen);
-        status_message("Too many layers");
-        return;
-    }
-    ntiles = doc->tw * doc->th;
-    if (!(m = AllocVec(ntiles * sizeof(Tile *), MEMF_ANY | MEMF_CLEAR))) {
-        layer_free(l, doc);
-        free(gen);
-        return;
-    }
-    /* weiche Kante nur nach aussen: innerhalb der Auswahl volle Deckung */
-    {
-        UBYTE *t = malloc(j->w * j->h);
-        if (t) {
-            memcpy(t, j->sel, j->w * j->h);
-            soften(t, j->w, j->h, (j->w > j->h ? j->w : j->h) / 250 + 1);
-            for (i = 0; i < j->w * j->h; i++)
-                if (t[i] > j->sel[i])
-                    j->sel[i] = t[i];
-            free(t);
+    if (j->target) {            /* "Generate again": neue Variante der Ebene */
+        place_variant(j, gen);
+    } else {
+        GenInfo *g;
+        /* neue Ebene ueber der aktiven */
+        if (doc->nlayers >= MAX_LAYERS || !(l = layer_new(doc, j->name))) {
+            free(gen);
+            status_message("Too many layers");
+            return;
         }
-    }
-    for (ty = j->y >> TILE_SHIFT; ty <= (j->y + j->h - 1) >> TILE_SHIFT; ty++)
-        for (tx = j->x >> TILE_SHIFT; tx <= (j->x + j->w - 1) >> TILE_SHIFT; tx++) {
-            LONG idx = ty * doc->tw + tx, x0 = tx << TILE_SHIFT, y0 = ty << TILE_SHIFT;
-            Tile *t = tile_new(), *mt = tile_new_gray(0);
-            if (!t || !mt) {
-                if (t) FreeVec(t);
-                if (mt) FreeVec(mt);
-                continue;
+        ntiles = doc->tw * doc->th;
+        if (!(m = AllocVec(ntiles * sizeof(Tile *), MEMF_ANY | MEMF_CLEAR))) {
+            layer_free(l, doc);
+            free(gen);
+            return;
+        }
+        /* weiche Kante nur nach aussen: innerhalb der Auswahl volle Deckung */
+        {
+            UBYTE *t = malloc(j->w * j->h);
+            if (t) {
+                memcpy(t, j->sel, j->w * j->h);
+                soften(t, j->w, j->h, (j->w > j->h ? j->w : j->h) / 250 + 1);
+                for (i = 0; i < j->w * j->h; i++)
+                    if (t[i] > j->sel[i])
+                        j->sel[i] = t[i];
+                free(t);
             }
-            for (y = 0; y < TILE_SIZE; y++) {
-                LONG dy = y0 + y - j->y;
-                if (dy < 0 || dy >= j->h)
+        }
+        for (ty = j->y >> TILE_SHIFT; ty <= (j->y + j->h - 1) >> TILE_SHIFT; ty++)
+            for (tx = j->x >> TILE_SHIFT; tx <= (j->x + j->w - 1) >> TILE_SHIFT; tx++) {
+                LONG idx = ty * doc->tw + tx, x0 = tx << TILE_SHIFT, y0 = ty << TILE_SHIFT;
+                Tile *t = tile_new(), *mt = tile_new_gray(0);
+                if (!t || !mt) {
+                    if (t) FreeVec(t);
+                    if (mt) FreeVec(mt);
                     continue;
-                for (x = 0; x < TILE_SIZE; x++) {
-                    LONG dx = x0 + x - j->x;
-                    if (dx < 0 || dx >= j->w)
-                        continue;
-                    t->px[(y << TILE_SHIFT) | x] = gen[dy * j->w + dx];
-                    mt->px[(y << TILE_SHIFT) | x] = 0xFF000000 | (j->sel[dy * j->w + dx] * 0x010101);
                 }
+                for (y = 0; y < TILE_SIZE; y++) {
+                    LONG dy = y0 + y - j->y;
+                    if (dy < 0 || dy >= j->h)
+                        continue;
+                    for (x = 0; x < TILE_SIZE; x++) {
+                        LONG dx = x0 + x - j->x;
+                        if (dx < 0 || dx >= j->w)
+                            continue;
+                        t->px[(y << TILE_SHIFT) | x] = gen[dy * j->w + dx];
+                        mt->px[(y << TILE_SHIFT) | x] = 0xFF000000 | (j->sel[dy * j->w + dx] * 0x010101);
+                    }
+                }
+                tile_update_flag(doc, t, tx, ty);
+                l->tiles[idx] = t;
+                m[idx] = mt;
             }
-            tile_update_flag(doc, t, tx, ty);
-            l->tiles[idx] = t;
-            m[idx] = mt;
-        }
-    free(gen);
+        /* Prompt und erste Variante merken */
+        if ((g = AllocVec(sizeof(GenInfo), MEMF_ANY | MEMF_CLEAR))) {
+            strcpy(g->prompt, j->prompt);
+            g->mode = j->mode;
+            g->nvar = 1;
+            g->var[0].x = j->x;
+            g->var[0].y = j->y;
+            g->var[0].w = j->w;
+            g->var[0].h = j->h;
+            g->var[0].px = gen;
+            l->gen = g;
+        } else
+            free(gen);
 
-    src = doc->layers[doc->active];
-    l->depth = src->depth;
-    u = undo_begin_struct("Generative Fill");
-    l->mask = m;
-    l->mask_on = 1;
-    mask_compact(doc, l);
-    for (x = doc->nlayers; x > doc->active + 1; x--)
-        doc->layers[x] = doc->layers[x - 1];
-    doc->layers[doc->active + 1] = l;
-    doc->nlayers++;
-    doc->active++;
-    doc->edit_mask = FALSE;
-    doc->modified = TRUE;
-    doc_mark_all_dirty();
-    undo_commit(u);
+        src = doc->layers[doc->active];
+        l->depth = src->depth;
+        u = undo_begin_struct("Generative Fill");
+        l->mask = m;
+        l->mask_on = 1;
+        mask_compact(doc, l);
+        for (x = doc->nlayers; x > doc->active + 1; x--)
+            doc->layers[x] = doc->layers[x - 1];
+        doc->layers[doc->active + 1] = l;
+        doc->nlayers++;
+        doc->active++;
+        doc->edit_mask = FALSE;
+        doc->modified = TRUE;
+        doc_mark_all_dirty();
+        undo_commit(u);
+        if (ai_variants > 1 && l->gen) {
+            regen_left = ai_variants - 1;
+            regen_layer = l;
+        }
+    }
     ui_draw_panels();
     view_inval_all();
     {
@@ -709,15 +844,18 @@ static void place_result(AiJob *j)
             j->t_up = j->t0;
         if (!j->t_first || j->t_first < j->t_up)
             j->t_first = j->t_up;
-        sprintf(msg, "Generative Fill: %ld.%ld s (upload %ld.%ld, server %ld.%ld, download %ld.%ld, insert %ld.%ld, align %ld.%ld)",
+        sprintf(msg, "Generative Fill: %ld.%ld s (upload %ld.%ld, server %ld.%ld, download %ld.%ld, insert %ld.%ld)",
                 (long)((t - j->t0) / 1000000), (long)((t - j->t0) / 100000 % 10),
                 (long)((j->t_up - j->t0) / 1000000), (long)((j->t_up - j->t0) / 100000 % 10),
                 (long)((j->t_first - j->t_up) / 1000000), (long)((j->t_first - j->t_up) / 100000 % 10),
                 (long)((j->t_done - j->t_first) / 1000000), (long)((j->t_done - j->t_first) / 100000 % 10),
-                (long)((t - j->t_done) / 1000000), (long)((t - j->t_done) / 100000 % 10),
-                (long)(talign / 1000000), (long)(talign / 100000 % 10));
-        if (mc >= 0)
-            sprintf(msg + strlen(msg), ", %ld.%02ld cents", (long)(mc / 100), (long)(mc % 100));
+                (long)((t - j->t_done) / 1000000), (long)((t - j->t_done) / 100000 % 10));
+        if (mc >= 0) {
+            session_mc += mc;
+            sprintf(msg + strlen(msg), ", %ld.%02ld cents (session %ld.%02ld)", (long)(mc / 100),
+                    (long)(mc % 100), (long)(session_mc / 100), (long)(session_mc % 100));
+        }
+        (void)talign;
     }
     status_message(msg);
 }
@@ -741,6 +879,7 @@ void ai_cancel(void)
 {
     if (job)
         job->ctl.cancel = 1;
+    regen_left = 0;
 }
 
 /* Auftrag anlegen: Schluessel lesen, Signal holen */
@@ -794,7 +933,14 @@ static BOOL job_launch(AiJob *j)
  * Der zu fuellende Bereich (Auswahl und Durchsichtiges) wird im gesendeten Bild
  * grau gemacht, ohne eigenes Maskenbild: mit Maske uebernahmen die Modelle
  * teils die weisse Maske, liessen Grau stehen oder zoomten ins Original. */
+static BOOL start_fill(const char *prompt, Layer *target);
+
 BOOL ai_start(const char *prompt)
+{
+    return start_fill(prompt, NULL);
+}
+
+static BOOL start_fill(const char *prompt, Layer *target)
 {
     static const char mark[] =
         "Image editing task. In this photo, one or more objects are marked with a translucent pink brush "
@@ -832,6 +978,11 @@ BOOL ai_start(const char *prompt)
     sh = (bh * x + lng / 2) / lng;
 
     j->kind = AI_FILL;
+    j->target = target;
+    if (prompt) {
+        strncpy(j->prompt, prompt, sizeof(j->prompt) - 1);
+        j->prompt[sizeof(j->prompt) - 1] = 0;
+    }
     j->x = bx;
     j->y = by;
     j->w = bw;
@@ -872,6 +1023,7 @@ BOOL ai_start(const char *prompt)
         sprintf(j->name, "Gen: %.26s", prompt);
     else
         strcpy(j->name, j->grow ? "Gen: Remove" : "Gen: Extend");
+    j->mode = !remove ? GEN_FILL : j->grow ? GEN_REMOVE : GEN_EXTEND;
 
     if (!stbi_write_jpg_to_func(mem_write, &jpg, sw, sh, 3, rgb, 92) || !jpg.p)
         goto fail;
@@ -922,6 +1074,69 @@ fail:
     job_free(j);
     status_message("Not enough memory");
     return FALSE;
+}
+
+/* Generate again: neue Variante fuer die aktive generative Ebene. Gesendet wird
+ * das Bild ohne diese Ebene; Bereich = Ebenenmaske, soweit die Ebene Pixel hat. */
+BOOL ai_regenerate(void)
+{
+    Layer *l = doc->layers[doc->active];
+    GenInfo *g = l->gen;
+    UBYTE *m, *osel = doc->sel;
+    BOOL ohas = doc->hassel, ok;
+    LONG o0 = doc->selx0, o1 = doc->sely0, o2 = doc->selx1, o3 = doc->sely1, x, y;
+    LONG x0 = doc->w, y0 = doc->h, x1 = 0, y1 = 0;
+    if (!g || !l->mask) {
+        status_message("Not a generative layer");
+        return FALSE;
+    }
+    if (job) {
+        status_message("An AI request is already running");
+        return FALSE;
+    }
+    if (!(m = AllocVec(doc->w * doc->h, MEMF_ANY | MEMF_CLEAR)))
+        return FALSE;
+    for (y = 0; y < doc->h; y++)
+        for (x = 0; x < doc->w; x++) {
+            LONG idx = (y >> TILE_SHIFT) * doc->tw + (x >> TILE_SHIFT), k = ((y & TILE_MASK) << TILE_SHIFT) | (x & TILE_MASK);
+            Tile *t = l->tiles[idx], *mt = l->mask[idx];
+            UBYTE v;
+            if (!t || !(t->px[k] >> 24))
+                continue;
+            v = mt ? (UBYTE)mt->px[k] : 255;
+            m[y * doc->w + x] = v;
+            if (v >= 128) {
+                if (x < x0) x0 = x;
+                if (x >= x1) x1 = x + 1;
+                if (y < y0) y0 = y;
+                if (y >= y1) y1 = y + 1;
+            }
+        }
+    if (x1 <= x0) {
+        FreeVec(m);
+        status_message("The generative layer is empty");
+        return FALSE;
+    }
+    l->visible = 0;                     /* Bild ohne diese Ebene senden */
+    doc_mark_all_dirty();
+    doc_process_dirty();
+    doc->sel = m;
+    doc->hassel = TRUE;
+    doc->selx0 = x0;
+    doc->sely0 = y0;
+    doc->selx1 = x1;
+    doc->sely1 = y1;
+    ok = start_fill(g->mode == GEN_FILL ? g->prompt : NULL, l);
+    doc->sel = osel;
+    doc->hassel = ohas;
+    doc->selx0 = o0;
+    doc->sely0 = o1;
+    doc->selx1 = o2;
+    doc->sely1 = o3;
+    l->visible = 1;
+    doc_mark_all_dirty();
+    FreeVec(m);
+    return ok;
 }
 
 /* Entfernen mit eigener Maske (KI-Reparaturpinsel): etwas vergroessern, damit
@@ -1269,6 +1484,97 @@ fail:
     return FALSE;
 }
 
+/* ---------- Einstellungen ---------- */
+
+/* Edit > AI Settings... */
+void ai_settings(void)
+{
+    LONG fm = ai_fill_model, rm = ai_fast_model, nv = ai_variants - 1;
+    DlgSlider ds[3] = {
+        { "Fill model:", &fm, DLG_CHOICE, DLG_CHOICE, "Nano Banana 2.1|Nano Banana Pro|Flash Lite (fast)", 1 },
+        { "Remove/Extend:", &rm, DLG_CHOICE, DLG_CHOICE, "Flash Lite (fast)|Nano Banana 2.1", 1 },
+        { "Variants:", &nv, DLG_CHOICE, DLG_CHOICE, "1|2|3", 1 },
+    };
+    if (!dialog_run("AI Settings", ds, 3, NULL))
+        return;
+    ai_fill_model = fm;
+    ai_fast_model = rm;
+    ai_variants = nv + 1;
+    ui_prefs_save();
+    if (session_mc) {
+        char msg[80];
+        sprintf(msg, "AI costs this session: %ld.%02ld cents", (long)(session_mc / 100), (long)(session_mc % 100));
+        status_message(msg);
+    }
+}
+
+/* Edit > AI API Key...: Schluessel eingeben, speichern und bei OpenRouter pruefen */
+void ai_key_dialog(void)
+{
+    static const char *files[2] = { "ENV:AmiPixelShop/openrouter.key", "ENVARC:AmiPixelShop/openrouter.key" };
+    char key[160], hdr[220], msg[240], val[40];
+    LONG bw = 560, bh = 118, bx = cvx + (cvw - bw) / 2, by = cvy + (cvh - bh) / 2, k;
+    NetResp r;
+    NetCtl ctl;
+    const char *v;
+    LONG vl;
+
+    if (job) {
+        status_message("An AI request is running");
+        return;
+    }
+    read_key(key, sizeof(key));
+    fill(bx, by, bw, bh, COL_PANEL);
+    frame(bx, by, bw, bh, COL_LINE);
+    fill(bx, by, bw, 26, COL_PANELHD);
+    text_bold(bx + 12, by + 4, "OpenRouter API Key", COL_TEXT);
+    text(bx + 12, by + 36, "Key (openrouter.ai/keys), Return to save:", COL_DIM);
+    text(bx + 12, by + 92, "Stored in ENVARC:AmiPixelShop/openrouter.key", COL_DIM);
+    blit(bx, by, bw, bh);
+    if (!ui_edit_text(bx + 12, by + 58, bw - 24, key, sizeof(key)) || !key[0]) {
+        view_inval_all();
+        view_flush();
+        return;
+    }
+    view_inval_all();
+    view_flush();
+    UnLock(CreateDir("ENV:AmiPixelShop"));
+    UnLock(CreateDir("ENVARC:AmiPixelShop"));
+    for (k = 0; k < 2; k++) {
+        BPTR fh = Open((STRPTR)files[k], MODE_NEWFILE);
+        if (fh) {
+            Write(fh, key, strlen(key));
+            Close(fh);
+        }
+    }
+    /* pruefen: Guthaben abfragen */
+    status_message("Checking the key...");
+    memset(&ctl, 0, sizeof(ctl));
+    ctl.timeout = 20;
+    sprintf(hdr, "Authorization: Bearer %s\r\n", key);
+    if (!net_https(AI_HOST, "GET", "/api/v1/key", hdr, NULL, 0, &r, &ctl)) {
+        sprintf(msg, "The key was saved, but OpenRouter could not be reached:\n\n%s", r.err);
+    } else if (r.status != 200) {
+        sprintf(msg, "The key was saved, but OpenRouter rejected it (HTTP %ld).", (long)r.status);
+        net_free(&r);
+    } else {
+        strcpy(msg, "The key works.");
+        if ((v = json_get((char *)r.body, "data.usage", &vl)) && vl < 30) {
+            memcpy(val, v, vl);
+            val[vl] = 0;
+            sprintf(msg + strlen(msg), "\n\nUsed so far: $%s", val);
+        }
+        if ((v = json_get((char *)r.body, "data.limit_remaining", &vl)) && vl < 30 && *v != 'n') {
+            memcpy(val, v, vl);
+            val[vl] = 0;
+            sprintf(msg + strlen(msg), "\nRemaining limit: $%s", val);
+        }
+        net_free(&r);
+    }
+    status_message("");
+    request(msg, "OK");
+}
+
 /* nach einem Signal oder zyklisch: fertige Anfrage auswerten */
 void ai_poll(void)
 {
@@ -1291,6 +1597,7 @@ void ai_poll(void)
         }
     } else if (!j->ctl.cancel) {
         char msg[200];
+        regen_left = 0;
         sprintf(msg, "%s failed:\n\n%s", j->kind == AI_SUBJECT ? "Select Subject" :
                 j->kind == AI_RMBG ? "Remove Background" : "Generative Fill", j->err);
         job = NULL;
@@ -1304,6 +1611,18 @@ void ai_poll(void)
     job = NULL;
     bar_inval();
     job_free(j);
+    if (regen_left > 0) {               /* weitere Varianten (AI Settings: Variants) */
+        BOOL found = FALSE;
+        LONG i;
+        for (i = 0; i < doc->nlayers; i++)
+            if (doc->layers[i] == regen_layer)
+                found = TRUE;
+        regen_left--;
+        if (found && doc->layers[doc->active] == regen_layer)
+            ai_regenerate();
+        else
+            regen_left = 0;
+    }
 }
 
 /* beim Beenden: laufende Anfrage abbrechen und abwarten */

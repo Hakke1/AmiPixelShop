@@ -1759,6 +1759,19 @@ void do_command(LONG c)
     case CMD_SEL_SUBJECT:
         ai_segment(1);
         break;
+    case CMD_AI_SETTINGS:
+        ai_settings();
+        break;
+    case CMD_AI_KEY:
+        ai_key_dialog();
+        break;
+    case CMD_GEN_AGAIN:
+        ai_regenerate();
+        break;
+    case CMD_GEN_PREV:
+    case CMD_GEN_NEXT:
+        ai_gen_step(c == CMD_GEN_NEXT ? 1 : -1);
+        break;
     case CMD_TASKBAR:
         ai_taskbar = !ai_taskbar;
         ui_prefs_save();

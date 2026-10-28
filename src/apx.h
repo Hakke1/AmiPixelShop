@@ -110,7 +110,20 @@ typedef struct APLayer {
     UBYTE clip;                 /* Schnittmaske: auf die Ebene darunter beschnitten */
     UBYTE picked;               /* im Ebenen-Panel mit ausgewaehlt (nur Bedienung) */
     UBYTE mask_unlink;          /* 0: Maske bewegt sich mit der Ebene (Kette) */
+    struct GenInfo *gen;        /* generative Ebene (KI): Prompt und Varianten, sonst NULL */
 } Layer;
+
+/* Generative Ebene: Prompt und Varianten (nur der Prompt wird gespeichert) */
+#define GEN_MAXVAR 6
+enum { GEN_FILL, GEN_REMOVE, GEN_EXTEND };
+typedef struct GenVar { LONG x, y, w, h; ULONG *px; } GenVar;   /* px: ARGB, w*h, malloc */
+typedef struct GenInfo {
+    char prompt[200];
+    LONG mode;                  /* GEN_* */
+    LONG nvar, cur;
+    GenVar var[GEN_MAXVAR];
+} GenInfo;
+void ai_gen_free(GenInfo *g);
 enum { LOCK_ALPHA = 1, LOCK_PIXELS = 2, LOCK_POS = 4, LOCK_ALL = 7 };
 
 /* Arbeitspfad (Pen Tool) */
@@ -661,6 +674,7 @@ enum {
     CMD_TF_FREE, CMD_TF_DISTORT, CMD_TF_PERSP, CMD_TF_WARP,
     CMD_FLT_LIQUIFY, CMD_LQ_APPLY, CMD_LQ_CANCEL, CMD_EXPORT_IFF,
     CMD_PAL_LOAD, CMD_PAL_SAVE, CMD_PAL_FIX, CMD_GEN_FILL, CMD_GEN_REMOVE, CMD_SEL_SUBJECT, CMD_REMOVE_BG, CMD_TASKBAR,
+    CMD_AI_SETTINGS, CMD_AI_KEY, CMD_GEN_AGAIN, CMD_GEN_PREV, CMD_GEN_NEXT,
     CMD_GROUP_NEW, CMD_GROUP, CMD_UNGROUP, CMD_MERGE_GROUP, CMD_ADJ_EDIT,
     CMD_NADJ_BRICON, CMD_NADJ_LEVELS, CMD_NADJ_CURVES, CMD_NADJ_HUESAT, CMD_NADJ_DESAT,
     CMD_NADJ_INVERT, CMD_NADJ_THRESH, CMD_NADJ_POSTER, CMD_FLIP_H, CMD_FLIP_V, CMD_ROT180, CMD_ROT90CW, CMD_ROT90CCW,
@@ -694,6 +708,11 @@ BOOL ai_start(const char *prompt);  /* NULL: Inhalt der Auswahl entfernen */
 BOOL ai_start_mask(UBYTE *m);       /* Entfernen mit eigener Maske (w*h, wird veraendert) */
 BOOL ai_segment(LONG kind);         /* 1: Select Subject, 2: Remove Background */
 extern BOOL ai_taskbar;             /* schwebende KI-Leiste anzeigen */
+extern LONG ai_fill_model, ai_fast_model, ai_variants;
+void ai_settings(void);
+void ai_key_dialog(void);
+BOOL ai_regenerate(void);
+void ai_gen_step(LONG dir);
 void ai_bar_refresh(void);
 void ai_open_prompt(void);
 void ai_cancel(void);
