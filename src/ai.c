@@ -24,7 +24,7 @@ void main_activate_doc(Doc *d);
 BOOL crop_active(void);
 
 #define AI_HOST     "openrouter.ai"
-#define AI_MODEL    "google/gemini-nano-banana-2.1"
+#define AI_MODEL    "google/gemini-3.1-flash-lite-image"   /* schnell; Qualitaet: gemini-nano-banana-2.1 */
 #define AI_MINSIDE  768         /* lange Seite des gesendeten Ausschnitts */
 #define AI_MAXSIDE  1024
 
@@ -46,7 +46,7 @@ typedef struct AiJob {
     LONG x, y, w, h;            /* Ausschnitt im Dokument */
     UBYTE *sel;                 /* Auswahl im Ausschnitt, w*h */
     char name[32];              /* Ebenenname */
-    ULONG t0;
+    ULONG t0, t_up, t_first, t_done;    /* Start, Upload fertig, erstes Byte, Antwort da */
 } AiJob;
 
 static AiJob *job;              /* laufende Anfrage oder NULL */
@@ -161,34 +161,34 @@ static LONG crop_box(LONG *bx, LONG *by, LONG *bw, LONG *bh)
     return best;
 }
 
-/* Komposit (premultiplied) bilinear in RGB ueber Weiss abtasten */
+/* Komposit (premultiplied) bilinear in RGB abtasten; Durchsichtiges wird mittelgrau
+ * (das Modell soll es nicht fuer weisses Bild halten, es ist ohnehin zu fuellen) */
 static void sample_rgb(UBYTE *dst, LONG dw, LONG dh, LONG bx, LONG by, LONG bw, LONG bh)
 {
-    LONG x, y;
+    LONG x, y, sx = (bw << 16) / dw, sy = (bh << 16) / dh;
     for (y = 0; y < dh; y++) {
-        float fy = (y + 0.5f) * bh / dh - 0.5f;
-        LONG y0 = (LONG)floorf(fy), y1;
-        float wy = fy - y0;
-        if (y0 < 0) { y0 = 0; wy = 0; }
+        LONG fy = y * sy + (sy >> 1) - 32768, y0, y1, wy;
+        if (fy < 0) fy = 0;
+        y0 = fy >> 16;
+        wy = (fy >> 8) & 255;
         y1 = y0 + 1 < bh ? y0 + 1 : bh - 1;
         for (x = 0; x < dw; x++) {
-            float fx = (x + 0.5f) * bw / dw - 0.5f;
-            LONG x0 = (LONG)floorf(fx), x1, c;
-            float wx = fx - x0;
+            LONG fx = x * sx + (sx >> 1) - 32768, x0, x1, wx, c;
             ULONG p[4];
-            if (x0 < 0) { x0 = 0; wx = 0; }
+            if (fx < 0) fx = 0;
+            x0 = fx >> 16;
+            wx = (fx >> 8) & 255;
             x1 = x0 + 1 < bw ? x0 + 1 : bw - 1;
             p[0] = doc->flat[(by + y0) * doc->w + bx + x0];
             p[1] = doc->flat[(by + y0) * doc->w + bx + x1];
             p[2] = doc->flat[(by + y1) * doc->w + bx + x0];
             p[3] = doc->flat[(by + y1) * doc->w + bx + x1];
             for (c = 0; c < 3; c++) {
-                LONG sh = 16 - c * 8, k;
-                float v[4], r;
+                LONG sh = 16 - c * 8, v[4], k, r;
                 for (k = 0; k < 4; k++)
-                    v[k] = (float)(((p[k] >> sh) & 0xFF) + 255 - (p[k] >> 24));
-                r = (v[0] * (1 - wx) + v[1] * wx) * (1 - wy) + (v[2] * (1 - wx) + v[3] * wx) * wy;
-                dst[(y * dw + x) * 3 + c] = r > 255 ? 255 : (UBYTE)(r + 0.5f);
+                    v[k] = ((p[k] >> sh) & 0xFF) + ((255 - (p[k] >> 24)) >> 1);
+                r = ((v[0] * (256 - wx) + v[1] * wx) * (256 - wy) + (v[2] * (256 - wx) + v[3] * wx) * wy + 32768) >> 16;
+                dst[(y * dw + x) * 3 + c] = r > 255 ? 255 : r;
             }
         }
     }
@@ -300,6 +300,161 @@ static void soften(UBYTE *m, LONG w, LONG h, LONG r)
     free(t);
 }
 
+/* Graustufen-Kleinbild (Blockmittel) des Ergebnisses */
+static UBYTE *gen_thumb(const UBYTE *rgb, LONG iw, LONG ih, LONG tw, LONG th)
+{
+    UBYTE *t = malloc(tw * th);
+    LONG u, v, x, y;
+    if (!t)
+        return NULL;
+    for (v = 0; v < th; v++)
+        for (u = 0; u < tw; u++) {
+            LONG x0 = u * iw / tw, x1 = (u + 1) * iw / tw, y0 = v * ih / th, y1 = (v + 1) * ih / th, s = 0, n = 0;
+            for (y = y0; y < y1; y++)
+                for (x = x0; x < x1; x++) {
+                    const UBYTE *q = rgb + (y * iw + x) * 3;
+                    s += q[0] * 77 + q[1] * 151 + q[2] * 28;
+                    n++;
+                }
+            t[v * tw + u] = n ? s / (n * 256) : 0;
+        }
+    return t;
+}
+
+/* ... und vom Original im Ausschnitt; ok[] = Block ganz deckend und ausserhalb der Auswahl */
+static UBYTE *orig_thumb(AiJob *j, LONG tw, LONG th, UBYTE *ok)
+{
+    UBYTE *t = malloc(tw * th);
+    LONG u, v, x, y;
+    if (!t)
+        return NULL;
+    for (v = 0; v < th; v++)
+        for (u = 0; u < tw; u++) {
+            LONG x0 = u * j->w / tw, x1 = (u + 1) * j->w / tw, y0 = v * j->h / th, y1 = (v + 1) * j->h / th;
+            LONG s = 0, n = 0;
+            BOOL good = TRUE;
+            for (y = y0; y < y1; y++)
+                for (x = x0; x < x1; x++) {
+                    ULONG q = doc->flat[(j->y + y) * doc->w + j->x + x];
+                    if ((q >> 24) != 255 || j->sel[y * j->w + x])
+                        good = FALSE;
+                    s += ((q >> 16) & 0xFF) * 77 + ((q >> 8) & 0xFF) * 151 + (q & 0xFF) * 28;
+                    n++;
+                }
+            t[v * tw + u] = n ? s / (n * 256) : 0;
+            ok[v * tw + u] = good && n;
+        }
+    return t;
+}
+
+/* Summe der Abweichungen fuer Massstab s und Versatz (dx, dy), alles 16.16 in
+ * Kleinbild-Pixeln; ganzzahlig (float->int ist auf dem 68040 sehr langsam) */
+static LONG align_cost(const UBYTE *o, const UBYTE *ok, const UBYTE *g, LONG tw, LONG th,
+                       LONG bias, LONG s, LONG dx, LONG dy)
+{
+    LONG u, v, sum = 0, maxx = (tw - 1) << 16, maxy = (th - 1) << 16;
+    LONG fx0 = (tw << 15) + dx - 32768 - (((tw - 1) * s) >> 1);
+    LONG fy = (th << 15) + dy - 32768 - (((th - 1) * s) >> 1);
+    for (v = 0; v < th; v++, fy += s) {
+        LONG cy = fy < 0 ? 0 : fy > maxy ? maxy : fy, y0 = cy >> 16, wy = (cy >> 8) & 255;
+        const UBYTE *r0 = g + y0 * tw, *r1 = y0 + 1 < th ? r0 + tw : r0;
+        const UBYTE *orow = o + v * tw, *krow = ok + v * tw;
+        LONG fx = fx0;
+        for (u = 0; u < tw; u++, fx += s) {
+            LONG cx, x0, x1, wx, a, b, d;
+            if (!krow[u])
+                continue;
+            cx = fx < 0 ? 0 : fx > maxx ? maxx : fx;
+            x0 = cx >> 16;
+            x1 = x0 + 1 < tw ? x0 + 1 : x0;
+            wx = (cx >> 8) & 255;
+            a = r0[x0] * (256 - wx) + r0[x1] * wx;
+            b = r1[x0] * (256 - wx) + r1[x1] * wx;
+            d = (((LONG)orow[u] << 16) - (a * (256 - wy) + b * wy) - bias) / 256;
+            sum += d < 0 ? -d : d;
+        }
+    }
+    return sum;
+}
+
+/* Bildmodelle verschieben und zoomen den Inhalt oft etwas. Massstab und Versatz
+ * suchen, mit denen das Ergebnis am besten auf der unveraenderten Umgebung
+ * liegt: grob auf 64 Pixel Breite, dann feiner auf 128 und 256. Liefert den
+ * Versatz in Ausschnitt-Pixeln. */
+static void align_result(AiJob *j, const UBYTE *rgb, LONG iw, LONG ih, float *ps, float *pdx, float *pdy)
+{
+    LONG level, levels = j->w >= 400 ? 3 : 2;
+    LONG bs = 65536, bx = 0, by = 0;            /* 16.16 */
+    *ps = 1.0f;
+    *pdx = *pdy = 0;
+    for (level = 0; level < levels; level++) {
+        LONG tw = 64 << level, th = tw * j->h / j->w, i, n = 0, mo = 0, mg = 0, bias;
+        LONG s, dx, dy, s0, s1, ss, d0, d1, ds, best, c0, cbx, cby;
+        UBYTE *ok, *o, *g;
+        if (th < 16)
+            return;
+        ok = malloc(tw * th);
+        o = ok ? orig_thumb(j, tw, th, ok) : NULL;
+        g = o ? gen_thumb(rgb, iw, ih, tw, th) : NULL;
+        if (!g) {
+            free(ok);
+            free(o);
+            return;
+        }
+        for (i = 0; i < tw * th; i++) {
+            mg += g[i];
+            if (ok[i]) {
+                mo += o[i];
+                n++;
+            }
+        }
+        if (n < tw * th / 20) {     /* zu wenig Umgebung zum Vergleichen */
+            free(ok);
+            free(o);
+            free(g);
+            return;
+        }
+        bias = ((mo << 4) / n - (mg << 4) / (tw * th)) * 4096;  /* Helligkeitsunterschied, 16.16 */
+        if (level == 0) {
+            s0 = 58982; s1 = 72090; ss = 1311;          /* 0.90 .. 1.10, 0.02 */
+            d0 = -(6 << 16); d1 = 6 << 16; ds = 65536;
+        } else {                    /* bisheriges Ergebnis auf doppelte Aufloesung */
+            LONG r = level == 1 ? 1311 : 393;           /* 0.02 / 0.006 */
+            bx *= 2;
+            by *= 2;
+            s0 = bs - r; s1 = bs + r; ss = r / 2;
+            d0 = -(3 << 15); d1 = 3 << 15; ds = 32768;
+        }
+        if (level)                  /* fein: nur jedes zweite Pixel vergleichen */
+            for (i = 0; i < tw * th; i++)
+                if (((i / tw) | i) & 1)
+                    ok[i] = 0;
+        c0 = align_cost(o, ok, g, tw, th, bias, 65536, 0, 0);
+        best = 0x7FFFFFFF;
+        cbx = bx;
+        cby = by;
+        for (s = s0; s <= s1; s += ss)
+            for (dy = d0; dy <= d1; dy += ds)
+                for (dx = d0; dx <= d1; dx += ds) {
+                    LONG c = align_cost(o, ok, g, tw, th, bias, s, cbx + dx, cby + dy);
+                    if (c < best) {
+                        best = c;
+                        bs = s;
+                        bx = cbx + dx;
+                        by = cby + dy;
+                    }
+                }
+        free(ok);
+        free(o);
+        free(g);
+        if (level == levels - 1 && best < c0 - c0 / 20) {
+            *ps = bs / 65536.0f;
+            *pdx = (float)bx / 65536.0f * j->w / tw;
+            *pdy = (float)by / 65536.0f * j->h / th;
+        }
+    }
+}
+
 static void place_result(AiJob *j)
 {
     UBYTE *rgb;
@@ -310,7 +465,9 @@ static void place_result(AiJob *j)
     Layer *src, *l;
     Tile **m;
     UndoRec *u;
-    char msg[80];
+    char msg[200];
+    float as, adx, ady;
+    ULONG talign;
 
     doc_process_dirty();
     if (!(rgb = stbi_load_from_memory(j->img, j->imglen, &iw, &ih, &n, 3))) {
@@ -322,27 +479,39 @@ static void place_result(AiJob *j)
         status_message("Not enough memory");
         return;
     }
-    /* auf den Ausschnitt skalieren (bilinear) */
-    for (y = 0; y < j->h; y++) {
-        float fy = (y + 0.5f) * ih / j->h - 0.5f;
-        LONG y0 = (LONG)floorf(fy), y1;
-        float wy = fy - y0;
-        if (y0 < 0) { y0 = 0; wy = 0; }
-        y1 = y0 + 1 < ih ? y0 + 1 : ih - 1;
-        for (x = 0; x < j->w; x++) {
-            float fx = (x + 0.5f) * iw / j->w - 0.5f;
-            LONG x0 = (LONG)floorf(fx), x1, c;
-            float wx = fx - x0;
-            ULONG p = 0xFF000000;
-            if (x0 < 0) { x0 = 0; wx = 0; }
-            x1 = x0 + 1 < iw ? x0 + 1 : iw - 1;
-            for (c = 0; c < 3; c++) {
-                float v = (rgb[(y0 * iw + x0) * 3 + c] * (1 - wx) + rgb[(y0 * iw + x1) * 3 + c] * wx) * (1 - wy) +
-                          (rgb[(y1 * iw + x0) * 3 + c] * (1 - wx) + rgb[(y1 * iw + x1) * 3 + c] * wx) * wy;
-                p |= (ULONG)(v + 0.5f) << (16 - c * 8);
-            }
-            gen[y * j->w + x] = p;
+    /* ausrichten, dann auf den Ausschnitt skalieren (bilinear, 16.16; float nur je Zeile/Spalte) */
+    talign = now_us();
+    align_result(j, rgb, iw, ih, &as, &adx, &ady);
+    talign = now_us() - talign;
+    {
+        LONG *xs = malloc(j->w * sizeof(LONG));
+        if (!xs) {
+            stbi_image_free(rgb);
+            free(gen);
+            return;
         }
+        for (x = 0; x < j->w; x++) {
+            float fx = (((x + 0.5f) - j->w * 0.5f) * as + j->w * 0.5f + adx) * iw / j->w - 0.5f;
+            xs[x] = fx < 0 ? 0 : fx > iw - 1 ? (iw - 1) << 16 : (LONG)(fx * 65536.0f);
+        }
+        for (y = 0; y < j->h; y++) {
+            float fy = (((y + 0.5f) - j->h * 0.5f) * as + j->h * 0.5f + ady) * ih / j->h - 0.5f;
+            LONG cy = fy < 0 ? 0 : fy > ih - 1 ? (ih - 1) << 16 : (LONG)(fy * 65536.0f);
+            LONG y0 = cy >> 16, wy = (cy >> 8) & 255;
+            const UBYTE *r0 = rgb + y0 * iw * 3, *r1 = y0 + 1 < ih ? r0 + iw * 3 : r0;
+            ULONG *d = gen + y * j->w;
+            for (x = 0; x < j->w; x++) {
+                LONG x0 = xs[x] >> 16, wx = (xs[x] >> 8) & 255, x1 = x0 + 1 < iw ? x0 + 1 : x0, c;
+                ULONG p = 0xFF000000;
+                for (c = 0; c < 3; c++) {
+                    LONG t = r0[x0 * 3 + c] * (256 - wx) + r0[x1 * 3 + c] * wx;
+                    LONG b = r1[x0 * 3 + c] * (256 - wx) + r1[x1 * 3 + c] * wx;
+                    p |= (ULONG)(((t * (256 - wy) + b * wy) + 32768) >> 16) << (16 - c * 8);
+                }
+                d[x] = p;
+            }
+        }
+        free(xs);
     }
     stbi_image_free(rgb);
 
@@ -389,7 +558,18 @@ static void place_result(AiJob *j)
         free(gen);
         return;
     }
-    soften(j->sel, j->w, j->h, (j->w > j->h ? j->w : j->h) / 300 + 1);
+    /* weiche Kante nur nach aussen: innerhalb der Auswahl volle Deckung */
+    {
+        UBYTE *t = malloc(j->w * j->h);
+        if (t) {
+            memcpy(t, j->sel, j->w * j->h);
+            soften(t, j->w, j->h, (j->w > j->h ? j->w : j->h) / 250 + 1);
+            for (i = 0; i < j->w * j->h; i++)
+                if (t[i] > j->sel[i])
+                    j->sel[i] = t[i];
+            free(t);
+        }
+    }
     for (ty = j->y >> TILE_SHIFT; ty <= (j->y + j->h - 1) >> TILE_SHIFT; ty++)
         for (tx = j->x >> TILE_SHIFT; tx <= (j->x + j->w - 1) >> TILE_SHIFT; tx++) {
             LONG idx = ty * doc->tw + tx, x0 = tx << TILE_SHIFT, y0 = ty << TILE_SHIFT;
@@ -434,12 +614,23 @@ static void place_result(AiJob *j)
     undo_commit(u);
     ui_draw_panels();
     view_inval_all();
-    if (j->cost[0]) {
-        LONG mc = (LONG)(atof(j->cost) * 10000.0 + 0.5);      /* 1/100 Cent */
-        sprintf(msg, "Generative Fill: %ld s, %ld.%02ld cents", (long)((now_us() - j->t0) / 1000000),
-                (long)(mc / 100), (long)(mc % 100));
-    } else
-        sprintf(msg, "Generative Fill: %ld s", (long)((now_us() - j->t0) / 1000000));
+    {
+        ULONG t = now_us();
+        LONG mc = j->cost[0] ? (LONG)(atof(j->cost) * 10000.0 + 0.5) : -1;     /* 1/100 Cent */
+        if (!j->t_up)
+            j->t_up = j->t0;
+        if (!j->t_first || j->t_first < j->t_up)
+            j->t_first = j->t_up;
+        sprintf(msg, "Generative Fill: %ld.%ld s (upload %ld.%ld, server %ld.%ld, download %ld.%ld, insert %ld.%ld, align %ld.%ld)",
+                (long)((t - j->t0) / 1000000), (long)((t - j->t0) / 100000 % 10),
+                (long)((j->t_up - j->t0) / 1000000), (long)((j->t_up - j->t0) / 100000 % 10),
+                (long)((j->t_first - j->t_up) / 1000000), (long)((j->t_first - j->t_up) / 100000 % 10),
+                (long)((j->t_done - j->t_first) / 1000000), (long)((j->t_done - j->t_first) / 100000 % 10),
+                (long)((t - j->t_done) / 1000000), (long)((t - j->t_done) / 100000 % 10),
+                (long)(talign / 1000000), (long)(talign / 100000 % 10));
+        if (mc >= 0)
+            sprintf(msg + strlen(msg), ", %ld.%02ld cents", (long)(mc / 100), (long)(mc % 100));
+    }
     status_message(msg);
 }
 
@@ -468,11 +659,22 @@ BOOL ai_start(const char *prompt)
 {
     static const char intro[] =
         "Image editing task. The first image is the photo to edit. The second image is a black-and-white "
-        "mask of the same size: white marks the region to change, black must stay unchanged. ";
+        "mask of the same size: white marks the region to fill, black must stay unchanged. Flat gray areas "
+        "in the photo are empty canvas, not part of the scene. ";
     static const char outro[] =
         "Match perspective, lighting, colors, sharpness and grain of the photo. Keep everything outside the "
-        "white region identical. Return the full edited photo with exactly the same framing and aspect "
-        "ratio, without the mask.";
+        "white region identical and at exactly the same position and scale: do not zoom, crop, shift or "
+        "reframe. Return the full edited photo with the same framing and aspect ratio, without the mask.";
+    /* Outpainting: ohne Maske; mit Maske zoomen die Modelle eher ins Original oder lassen Grau stehen */
+    static const char outpaint[] =
+        "Outpainting task. This photo is incomplete: the flat gray areas are empty canvas where the picture "
+        "is missing. Paint the missing parts so the result is one complete, seamless photograph: continue the "
+        "landscape, sky, terrain and every structure that touches the gray areas with the same perspective, "
+        "lighting, colors and grain. No gray may remain. Keep the existing photo content unchanged and at "
+        "exactly the same position and scale (do not zoom, crop, shift or reframe). Return the full image with "
+        "the same size and aspect ratio. ";
+    LONG nfill = 0, nempty = 0;
+    BOOL expand;
     AiJob *j;
     LONG bx, by, bw, bh, sw, sh, lng, x, y, ri, plen, l64a, l64b, jl;
     UBYTE *rgb = NULL, *msk = NULL, *png = NULL;
@@ -520,10 +722,6 @@ BOOL ai_start(const char *prompt)
     j->parent = FindTask(NULL);
     j->sig = ai_sigbit;
     j->ctl.timeout = 180;
-    if (remove)
-        strcpy(j->name, "Gen: Remove");
-    else
-        sprintf(j->name, "Gen: %.26s", prompt);
 
     /* Auswahl im Ausschnitt merken (darf sich waehrenddessen aendern) */
     if (!(j->sel = malloc(bw * bh)) || !(rgb = malloc(sw * sh * 3)) || !(msk = malloc(sw * sh)))
@@ -531,17 +729,31 @@ BOOL ai_start(const char *prompt)
     for (y = 0; y < bh; y++)
         memcpy(j->sel + y * bw, doc->sel + (by + y) * doc->w + bx, bw);
     sample_rgb(rgb, sw, sh, bx, by, bw, bh);
+    /* zu fuellen: Auswahl und alles Durchsichtige im Ausschnitt (Outpainting) */
     for (y = 0; y < sh; y++)
-        for (x = 0; x < sw; x++)
-            msk[y * sw + x] = j->sel[(y * bh / sh) * bw + x * bw / sw] ? 255 : 0;
+        for (x = 0; x < sw; x++) {
+            LONG ox = x * bw / sw, oy = y * bh / sh;
+            BOOL empty = (doc->flat[(by + oy) * doc->w + bx + ox] >> 24) < 128;
+            msk[y * sw + x] = (j->sel[oy * bw + ox] || empty) ? 255 : 0;
+            if (msk[y * sw + x]) {
+                nfill++;
+                nempty += empty;
+            }
+        }
+    expand = nempty * 4 > nfill;        /* ueberwiegend leere Flaeche: Outpainting */
+    if (!remove)
+        sprintf(j->name, "Gen: %.26s", prompt);
+    else
+        strcpy(j->name, expand ? "Gen: Extend" : "Gen: Remove");
 
     if (!stbi_write_jpg_to_func(mem_write, &jpg, sw, sh, 3, rgb, 92) || !jpg.p ||
-        !(png = stbi_write_png_to_mem(msk, sw, sw, sh, 1, &pngl)))
+        (!expand && !(png = stbi_write_png_to_mem(msk, sw, sw, sh, 1, &pngl))))
         goto fail;
     free(rgb);
     free(msk);
     rgb = msk = NULL;
-    if (!(e64 = b64_encode(jpg.p, jpg.n, &l64a)) || !(m64 = b64_encode(png, pngl, &l64b)))
+    l64b = 0;
+    if (!(e64 = b64_encode(jpg.p, jpg.n, &l64a)) || (png && !(m64 = b64_encode(png, pngl, &l64b))))
         goto fail;
     free(jpg.p);
     free(png);
@@ -552,30 +764,38 @@ BOOL ai_start(const char *prompt)
         goto fail;
     json_esc(remove ? "" : prompt, esc, plen * 2 + 8);
 
-    jl = l64a + l64b + strlen(esc) + sizeof(intro) + sizeof(outro) + 1024;
+    jl = l64a + l64b + strlen(esc) + sizeof(intro) + sizeof(outro) + sizeof(outpaint) + 1024;
     if (!(j->body = net_alloc(jl)))
         goto fail;
     p = j->body;
     sprintf(p, "{\"model\":\"%s\",\"modalities\":[\"image\",\"text\"],"
                "\"image_config\":{\"aspect_ratio\":\"%ld:%ld\"},\"usage\":{\"include\":true},"
                "\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"%s",
-            model_name(), (long)ratios[ri][0], (long)ratios[ri][1], intro);
+            model_name(), (long)ratios[ri][0], (long)ratios[ri][1], expand ? outpaint : intro);
     p += strlen(p);
-    if (remove)
-        strcpy(p, "Remove whatever is in the white region and fill it so it blends seamlessly "
-                  "with the surroundings, as if it had never been there. ");
-    else
+    if (expand) {
+        if (!remove)
+            sprintf(p, "In the new areas, include: %s. ", esc);
+    } else if (remove) {
+        strcpy(p, "Fill the white region so that it seamlessly continues the surrounding scene. If there is "
+                  "an object in the white region, remove it as if it had never been there. Do not add new "
+                  "objects. ");
+    } else {
         sprintf(p, "Fill the white region with: %s. ", esc);
+    }
     p += strlen(p);
-    strcpy(p, outro);
+    if (!expand)
+        strcpy(p, outro);
     strcat(p, "\"},{\"type\":\"image_url\",\"image_url\":{\"url\":\"data:image/jpeg;base64,");
     p += strlen(p);
     memcpy(p, e64, l64a);
     p += l64a;
-    strcpy(p, "\"}},{\"type\":\"image_url\",\"image_url\":{\"url\":\"data:image/png;base64,");
-    p += strlen(p);
-    memcpy(p, m64, l64b);
-    p += l64b;
+    if (!expand) {
+        strcpy(p, "\"}},{\"type\":\"image_url\",\"image_url\":{\"url\":\"data:image/png;base64,");
+        p += strlen(p);
+        memcpy(p, m64, l64b);
+        p += l64b;
+    }
     strcpy(p, "\"}}]}]}");
     p += strlen(p);
     j->blen = p - j->body;
@@ -615,6 +835,8 @@ void ai_poll(void)
     AiJob *j = job;
     if (!j || !j->done)
         return;
+    if (!j->t_done)
+        j->t_done = now_us();
     if (j->ok && !j->ctl.cancel) {
         /* nicht mitten in eine andere Aktion hinein */
         if (transform_active() || text_active() || liquify_active() || crop_active() || ui_dragging())
@@ -767,6 +989,12 @@ void ai_tick(void)
 {
     LONG x = 0, y = 0, w = 0, h = 0;
     BOOL vis = bar_visible();
+    if (job && !job->done) {
+        if (!job->t_up && job->ctl.sent >= job->blen)
+            job->t_up = now_us();
+        if (!job->t_first && job->ctl.recvd > 0)
+            job->t_first = now_us();
+    }
     ai_poll();
     if (vis)
         bar_rect(&x, &y, &w, &h);
