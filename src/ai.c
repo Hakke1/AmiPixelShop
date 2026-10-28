@@ -933,6 +933,72 @@ static BOOL job_launch(AiJob *j)
  * Der zu fuellende Bereich (Auswahl und Durchsichtiges) wird im gesendeten Bild
  * grau gemacht, ohne eigenes Maskenbild: mit Maske uebernahmen die Modelle
  * teils die weisse Maske, liessen Grau stehen oder zoomten ins Original. */
+/* Leere Pixel (empty[] != 0) von aussen nach innen mit dem Mittel der schon
+ * bekannten Nachbarn fuellen (Ring fuer Ring, Breitensuche), ergibt verschmierte
+ * Fortsetzung der Randfarben */
+static void smear_fill(UBYTE *rgb, UBYTE *empty, LONG w, LONG h)
+{
+    LONG n = w * h, *cur, *nxt, nc = 0, nn, i;
+    static const BYTE nb[4][2] = { { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 } };
+    if (!(cur = malloc(n * sizeof(LONG))) || !(nxt = malloc(n * sizeof(LONG)))) {
+        free(cur);
+        return;
+    }
+    /* erster Ring: leere Pixel neben bekannten */
+    for (i = 0; i < n; i++)
+        if (empty[i]) {
+            LONG x = i % w, y = i / w, k;
+            for (k = 0; k < 4; k++) {
+                LONG nx = x + nb[k][0], ny = y + nb[k][1];
+                if (nx >= 0 && ny >= 0 && nx < w && ny < h && !empty[ny * w + nx]) {
+                    cur[nc++] = i;
+                    empty[i] = 2;       /* in der Warteschlange */
+                    break;
+                }
+            }
+        }
+    while (nc) {
+        for (i = 0; i < nc; i++) {      /* Ring aus bekannten Nachbarn berechnen */
+            LONG c = cur[i], x = c % w, y = c / w, k, s[3] = { 0, 0, 0 }, cnt = 0;
+            for (k = 0; k < 4; k++) {
+                LONG nx = x + nb[k][0], ny = y + nb[k][1], q;
+                if (nx < 0 || ny < 0 || nx >= w || ny >= h || empty[q = ny * w + nx])
+                    continue;
+                s[0] += rgb[q * 3];
+                s[1] += rgb[q * 3 + 1];
+                s[2] += rgb[q * 3 + 2];
+                cnt++;
+            }
+            if (cnt) {
+                rgb[c * 3] = s[0] / cnt;
+                rgb[c * 3 + 1] = s[1] / cnt;
+                rgb[c * 3 + 2] = s[2] / cnt;
+            }
+        }
+        nn = 0;
+        for (i = 0; i < nc; i++)        /* Ring wird bekannt, naechsten sammeln */
+            empty[cur[i]] = 0;
+        for (i = 0; i < nc; i++) {
+            LONG c = cur[i], x = c % w, y = c / w, k;
+            for (k = 0; k < 4; k++) {
+                LONG nx = x + nb[k][0], ny = y + nb[k][1], q;
+                if (nx < 0 || ny < 0 || nx >= w || ny >= h || empty[q = ny * w + nx] != 1)
+                    continue;
+                empty[q] = 2;
+                nxt[nn++] = q;
+            }
+        }
+        {
+            LONG *t = cur;
+            cur = nxt;
+            nxt = t;
+        }
+        nc = nn;
+    }
+    free(cur);
+    free(nxt);
+}
+
 static BOOL start_fill(const char *prompt, Layer *target);
 
 BOOL ai_start(const char *prompt)
@@ -949,6 +1015,14 @@ static BOOL start_fill(const char *prompt, Layer *target)
         "scene. Remove the pink marking as well. Do not add new objects. Keep everything else identical and "
         "at exactly the same position and scale (do not zoom, crop, shift or reframe). Return the full photo "
         "with the same size and aspect ratio.";
+    static const char smeared[] =
+        "Image completion task. Parts of this photo are missing: they were roughly pre-filled with blurry "
+        "smeared colors as a placeholder. Repaint those blurry smeared areas with sharp, realistic detail so "
+        "the result is one complete, seamless photograph: continue the landscape, sky, terrain and every "
+        "structure with the same perspective, lighting, colors, sharpness and grain. Flat mid-gray areas, if "
+        "any, are missing too. Keep the sharp original photo content unchanged and at exactly the same "
+        "position and scale (do not zoom, crop, shift or reframe). Return the full image with the same size "
+        "and aspect ratio. ";
     static const char task[] =
         "Image completion task. Parts of this photo are missing: they are filled with perfectly flat, "
         "uniform mid-gray. Paint the missing parts so the result is one complete, seamless photograph: "
@@ -961,7 +1035,8 @@ static BOOL start_fill(const char *prompt, Layer *target)
     UBYTE *rgb = NULL;
     MemBuf jpg = { NULL, 0, 0 };
     char *e64 = NULL, *esc = NULL, *p;
-    BOOL remove = !prompt || !prompt[0];
+    BOOL remove = !prompt || !prompt[0], smear;
+    UBYTE *rgb_empty = NULL;
 
     if (!doc->hassel && !job) {
         status_message("Make a selection first");
@@ -1004,14 +1079,19 @@ static BOOL start_fill(const char *prompt, Layer *target)
             }
         }
     /* Entfernen: Objekt rosa markieren (das Modell soll es sehen und ganz entfernen).
-     * Fuellen mit Prompt und Erweitern: Bereich grau, das Modell malt ihn neu. */
+     * Fuellen mit Prompt: Bereich grau, das Modell malt ihn neu.
+     * Leere (durchsichtige) Flaeche: mit verschmierten Randfarben vorfuellen - bei
+     * Grau liessen die Modelle schmale Streifen als "Balken" stehen. */
     j->grow = remove && nempty * 4 <= nfill;
+    smear = nempty > 0 && (rgb_empty = malloc(sw * sh)) != NULL;
     for (y = 0; y < sh; y++)
         for (x = 0; x < sw; x++) {
             LONG ox = x * bw / sw, oy = y * bh / sh;
             BOOL empty = (doc->flat[(by + oy) * doc->w + bx + ox] >> 24) < 128;
             UBYTE *q = rgb + (y * sw + x) * 3;
-            if (empty || (!j->grow && j->sel[oy * bw + ox] >= 128)) {
+            if (smear)
+                rgb_empty[y * sw + x] = empty;
+            if (empty || (!j->grow && !(smear && remove) && j->sel[oy * bw + ox] >= 128)) {
                 q[0] = q[1] = q[2] = 128;
             } else if (j->grow && j->sel[oy * bw + ox] >= 128) {
                 q[0] = (q[0] + 2 * 255) / 3;
@@ -1019,6 +1099,11 @@ static BOOL start_fill(const char *prompt, Layer *target)
                 q[2] = (q[2] + 2 * 160) / 3;
             }
         }
+    if (smear) {
+        smear_fill(rgb, rgb_empty, sw, sh);
+        free(rgb_empty);
+        rgb_empty = NULL;
+    }
     if (!remove)
         sprintf(j->name, "Gen: %.26s", prompt);
     else
@@ -1039,19 +1124,22 @@ static BOOL start_fill(const char *prompt, Layer *target)
         goto fail;
     json_esc(remove ? "" : prompt, esc, plen * 2 + 8);
 
-    jl = l64 + strlen(esc) + sizeof(task) + sizeof(mark) + 1024;
+    jl = l64 + strlen(esc) + sizeof(task) + sizeof(mark) + sizeof(smeared) + 1024;
     if (!(j->body = net_alloc(jl)))
         goto fail;
     p = j->body;
     sprintf(p, "{\"model\":\"%s\",\"modalities\":[\"image\",\"text\"],"
                "\"image_config\":{\"aspect_ratio\":\"%ld:%ld\"},\"usage\":{\"include\":true},"
                "\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"%s",
-            model_name(!remove), (long)ratios[ri][0], (long)ratios[ri][1], j->grow ? mark : task);
+            model_name(!remove), (long)ratios[ri][0], (long)ratios[ri][1],
+            j->grow ? mark : smear ? smeared : task);
     p += strlen(p);
     if (j->grow)
         ;
     else if (remove)
         strcpy(p, "Do not add new objects.");
+    else if (smear)
+        sprintf(p, "In the new areas, include: %s. Blend it naturally into the scene.", esc);
     else
         sprintf(p, "In the gray areas, paint: %s. Blend it naturally into the scene.", esc);
     p += strlen(p);
@@ -1068,6 +1156,7 @@ static BOOL start_fill(const char *prompt, Layer *target)
 
 fail:
     free(rgb);
+    free(rgb_empty);
     free(jpg.p);
     net_freemem(e64);
     free(esc);
@@ -1585,7 +1674,8 @@ void ai_poll(void)
         j->t_done = now_us();
     if (j->ok && !j->ctl.cancel) {
         /* nicht mitten in eine andere Aktion hinein */
-        if (transform_active() || text_active() || liquify_active() || crop_active() || ui_dragging())
+        if (transform_active() || text_active() || liquify_active() || crop_active() || ui_dragging() ||
+            ui_menu_open())
             return;
         if (doc_alive(j->doc)) {
             if (j->doc != doc)
@@ -1712,6 +1802,19 @@ void ai_overlay(void)
     if (!bar_visible())
         return;
     bar_rect(&x, &y, &w, &h);
+    if (!bar_w) {                       /* gezeichneten Umriss merken */
+        bar_x = x;
+        bar_y = y;
+        bar_w = w;
+        bar_h = h;
+    } else {
+        LONG x1 = bar_x + bar_w > x + w ? bar_x + bar_w : x + w;
+        LONG y1 = bar_y + bar_h > y + h ? bar_y + bar_h : y + h;
+        if (x < bar_x) bar_x = x;
+        if (y < bar_y) bar_y = y;
+        bar_w = x1 - bar_x;
+        bar_h = y1 - bar_y;
+    }
     fill(x + 3, y + 3, w, h, 0xFF151515);    /* Schatten */
     fill(x, y, w, h, COL_PANEL);
     frame(x, y, w, h, COL_LINE);
@@ -1746,6 +1849,9 @@ void ai_overlay(void)
     }
 }
 
+/* bar_x/y/w/h: Umriss aller seit dem letzten bar_inval gezeichneten Leisten
+ * (ai_overlay traegt ein). Neu zeichnen = diesen Umriss und die neue Lage
+ * ungueltig machen; danach zeichnet ai_overlay die Leiste nur an der neuen Lage. */
 static void bar_inval(void)
 {
     LONG x, y, w, h;
@@ -1754,13 +1860,8 @@ static void bar_inval(void)
     if (bar_visible()) {
         bar_rect(&x, &y, &w, &h);
         view_inval(x, y, x + w + 3, y + h + 3);
-        bar_x = x;
-        bar_y = y;
-        bar_w = w;
-        bar_h = h;
-    } else {
-        bar_w = 0;
     }
+    bar_w = 0;
 }
 
 void ai_bar_refresh(void)
@@ -1772,7 +1873,11 @@ void ai_bar_refresh(void)
 void ai_tick(void)
 {
     LONG x = 0, y = 0, w = 0, h = 0;
-    BOOL vis = bar_visible();
+    BOOL vis;
+    if (ui_menu_open())                 /* Menue offen: Leiste unveraendert lassen, danach
+                                         * alte und neue Lage gemeinsam neu zeichnen */
+        return;
+    vis = bar_visible();
     if (job && !job->done) {
         if (!job->t_up && job->ctl.sent >= job->blen)
             job->t_up = now_us();
@@ -1796,7 +1901,7 @@ void ai_tick(void)
             bar_inval();
         }
     }
-    if ((vis ? w : 0) != bar_w || (vis && (x != bar_x || y != bar_y)))
+    if ((vis ? w : 0) != bar_w || (vis && (x != bar_x || y != bar_y || h != bar_h)))
         bar_inval();
     else if (job && (now_us() - job->t0) / 500000 != bar_secs) {
         bar_secs = (now_us() - job->t0) / 500000;
