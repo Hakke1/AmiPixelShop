@@ -777,8 +777,13 @@ void ui_draw_options(void)
             for (i = 0; i < n_opt_sliders; i++)
                 x = slider_draw(opt_sliders[i], x, ty) + 14;
             text(x, ty, "Source: click the left column of the History panel", COL_DIM);
-        } else
-            text(x, ty, "Paint over a spot - it is replaced by matching texture from nearby", COL_DIM);
+        } else {
+            chk_x[0] = x;
+            x = checkbox(x, y, "Generative AI", heal_ai);
+            chk_w[0] = x - chk_x[0];
+            text(x + 18, ty, heal_ai ? "Paint over an object - AI removes it (OpenRouter)" :
+                 "Paint over a spot - it is replaced by matching texture from nearby", COL_DIM);
+        }
         break;
     case T_CLONE:
         x = brush_button(x, y) + 12;
@@ -3112,6 +3117,10 @@ BOOL ui_mouse_down(LONG x, LONG y)
         }
         if (tool == T_CLONE && x >= chk_x[0] && x < chk_x[0] + chk_w[0]) {
             clone_aligned = !clone_aligned;
+            ui_draw_options();
+        }
+        if (tool == T_HEAL && x >= chk_x[0] && x < chk_x[0] + chk_w[0]) {
+            heal_ai = !heal_ai;
             ui_draw_options();
         }
         if (tool == T_BUCKET) {

@@ -557,6 +557,7 @@ void heal_begin(float x, float y);
 
 /* paint.c: Kopierstempel */
 extern BOOL clone_aligned;
+extern BOOL heal_ai;
 void clone_set_source(float x, float y);
 BOOL clone_has_source(void);
 void clone_begin(float x, float y);
@@ -690,6 +691,7 @@ LONG request(const char *body, const char *gadgets);
 
 /* ---- KI (ai.c) ---- */
 BOOL ai_start(const char *prompt);  /* NULL: Inhalt der Auswahl entfernen */
+BOOL ai_start_mask(UBYTE *m);       /* Entfernen mit eigener Maske (w*h, wird veraendert) */
 void ai_open_prompt(void);
 void ai_cancel(void);
 BOOL ai_busy(void);

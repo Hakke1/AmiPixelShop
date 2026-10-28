@@ -37,6 +37,7 @@ static ULONG *fx_tmp, *fx_smudge;
 static LONG fx_tmp_size;
 static BOOL fx_smudge_init;
 BOOL clone_aligned = TRUE;
+BOOL heal_ai;                   /* Reparaturpinsel: Bereich per KI fuellen */
 static BOOL cl_src_set, cl_off_set;
 static float cl_sx, cl_sy;
 static LONG cl_ox, cl_oy;
@@ -397,8 +398,8 @@ static void stroke_start(float x, float y, BOOL erase, BOOL clone)
         s_erase = FALSE;
     } else
         doc_rasterize_text(doc->layers[doc->active]);
-    if (s_heal)
-        s_color = 0x000000;     /* Reparatur: Bereich dunkel markieren */
+    if (s_heal)                 /* Reparatur: Bereich dunkel bzw. (KI) rosa markieren */
+        s_color = heal_ai ? 0xE8508C : 0x000000;
     s_arr = doc_target();
     ntouched = 0;
     lastx = x;
@@ -703,6 +704,40 @@ void stroke_to(float x, float y)
     lasty = y;
 }
 
+/* KI-Reparatur: Vorschau zuruecknehmen, Strich als Maske an die KI geben */
+static void heal_ai_end(void)
+{
+    UBYTE *m = AllocVec(doc->w * doc->h, MEMF_ANY | MEMF_CLEAR);
+    LONG i, x, y;
+    for (i = 0; i < ntouched; i++) {
+        LONG idx = touched[i], ox = (idx % doc->tw) << TILE_SHIFT, oy = (idx / doc->tw) << TILE_SHIFT;
+        Tile *t = s_arr[idx];
+        if (orig_map[idx]) {
+            CopyMem(orig_map[idx]->px, t->px, sizeof(t->px));
+            FreeVec(orig_map[idx]);
+            orig_map[idx] = NULL;
+        } else if (t) {
+            FreeVec(t);         /* Kachel entstand erst durch den Strich */
+            s_arr[idx] = NULL;
+        }
+        if (m && cov_map[idx])
+            for (y = 0; y < TILE_SIZE && oy + y < doc->h; y++)
+                for (x = 0; x < TILE_SIZE && ox + x < doc->w; x++)
+                    m[(oy + y) * doc->w + ox + x] = cov_map[idx][(y << TILE_SHIFT) | x];
+        FreeVec(cov_map[idx]);
+        cov_map[idx] = NULL;
+        touched_flag[idx] = 0;
+        doc_mark_dirty(idx % doc->tw, idx / doc->tw);
+    }
+    ntouched = 0;
+    if (m) {
+        ai_start_mask(m);
+        FreeVec(m);
+    } else {
+        status_message("Not enough memory");
+    }
+}
+
 void stroke_end(void)
 {
     UndoRec *u;
@@ -710,6 +745,11 @@ void stroke_end(void)
     if (!s_active)
         return;
     s_active = FALSE;
+    if (s_heal && heal_ai) {
+        s_heal = FALSE;
+        heal_ai_end();
+        return;
+    }
     if (s_heal)
         heal_apply();
     {
