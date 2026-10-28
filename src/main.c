@@ -28,6 +28,7 @@
 #include <stdlib.h>
 #include <math.h>
 #include "apx.h"
+#include "net.h"
 #include "quant.h"
 
 #define APS_VERSION "0.4"
@@ -2219,6 +2220,84 @@ open:
     return open_screen(modeid);
 }
 
+/* Kommandozeile: AmiPixelShop NETTEST - prueft HTTPS, Base64, JSON und den OpenRouter-Key */
+static void net_test(void)
+{
+    static const char *keyfiles[] = { "ENV:AmiPixelShop/openrouter.key", "ENVARC:AmiPixelShop/openrouter.key" };
+    char key[160], hdr[200], val[160];
+    NetResp r;
+    NetCtl ctl;
+    const char *v;
+    LONG i, n, vl;
+    ULONG t0;
+    UBYTE raw[256], dec[256];
+    char *enc;
+
+    for (i = 0; i < 256; i++)
+        raw[i] = i * 7 + 3;
+    enc = b64_encode(raw, 256, &n);
+    vl = enc ? b64_decode(enc, n, dec) : 0;
+    Printf("Base64: %s\n", (ULONG)(vl == 256 && !memcmp(raw, dec, 256) ? "OK" : "FAILED"));
+    free(enc);
+
+    key[0] = 0;
+    for (i = 0; i < 2 && !key[0]; i++) {
+        BPTR fh = Open((STRPTR)keyfiles[i], MODE_OLDFILE);
+        if (fh) {
+            n = Read(fh, key, sizeof(key) - 1);
+            Close(fh);
+            key[n > 0 ? n : 0] = 0;
+            while (n > 0 && (UBYTE)key[n - 1] <= ' ')
+                key[--n] = 0;
+        }
+    }
+    Printf("API key: %s\n", (ULONG)(key[0] ? "found" : "missing (ENVARC:AmiPixelShop/openrouter.key)"));
+
+    memset(&ctl, 0, sizeof(ctl));
+    sprintf(hdr, "Authorization: Bearer %s\r\n", key);
+    if (key[0]) {
+        t0 = now_us();
+        if (!net_https("openrouter.ai", "GET", "/api/v1/key", hdr, NULL, 0, &r, &ctl)) {
+            Printf("/key: %s\n", (ULONG)r.err);
+        } else {
+            Printf("/key: HTTP %ld in %ld ms\n", r.status, (now_us() - t0) / 1000);
+            if ((v = json_get((char *)r.body, "data.limit_remaining", &vl)) ||
+                (v = json_get((char *)r.body, "data.usage", &vl))) {
+                json_str(v, vl, val, sizeof(val));
+                Printf("  limit remaining / usage: %s\n", (ULONG)val);
+            } else {
+                Printf("  %.200s\n", (ULONG)r.body);
+            }
+            net_free(&r);
+        }
+    }
+
+    t0 = now_us();
+    if (!net_https("openrouter.ai", "GET", "/api/v1/models?output_modalities=image", key[0] ? hdr : NULL,
+                   NULL, 0, &r, &ctl)) {
+        Printf("/models: %s\n", (ULONG)r.err);
+        return;
+    }
+    Printf("/models: HTTP %ld, %ld bytes in %ld ms\n", r.status, r.len, (now_us() - t0) / 1000);
+    for (i = 0; i < 100; i++) {
+        char id[96], pr[200];
+        sprintf(val, "data.%ld.id", i);
+        if (!(v = json_get((char *)r.body, val, &vl)))
+            break;
+        json_str(v, vl, id, sizeof(id));
+        sprintf(val, "data.%ld.pricing", i);
+        pr[0] = 0;
+        if ((v = json_get((char *)r.body, val, &vl))) {
+            if (vl > 199)
+                vl = 199;
+            memcpy(pr, v, vl);
+            pr[vl] = 0;
+        }
+        Printf("  %s %s\n", (ULONG)id, (ULONG)pr);
+    }
+    net_free(&r);
+}
+
 int main(int argc, char **argv)
 {
     LONG dw = 1280, dh = 960;
@@ -2260,6 +2339,12 @@ int main(int argc, char **argv)
         extern void bench_run(void);
         pixel_init();
         bench_run();
+        cleanup();
+        return RETURN_OK;
+    }
+
+    if (argc == 2 && !strcasecmp(argv[1], "NETTEST")) {
+        net_test();
         cleanup();
         return RETURN_OK;
     }

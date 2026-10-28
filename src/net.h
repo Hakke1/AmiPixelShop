@@ -1,0 +1,44 @@
+/*
+ * net.h - HTTPS ueber Roadshow (bsdsocket) + AmiSSL v5, Base64, Mini-JSON
+ *
+ * Alle Netzfunktionen oeffnen bsdsocket/AmiSSL im aufrufenden Task selbst
+ * (Bibliotheksbasen sind dort pro Task) - so laeuft eine Anfrage auch in
+ * einem eigenen Hintergrundprozess.
+ */
+#ifndef APX_NET_H
+#define APX_NET_H
+
+#include <exec/types.h>
+
+typedef struct NetResp {
+    LONG  status;           /* HTTP-Status, 0 = keine Antwort */
+    UBYTE *body;            /* nullterminiert, mit free() freigeben */
+    LONG  len;
+    char  err[128];         /* Fehlertext bei FALSE */
+} NetResp;
+
+typedef struct NetCtl {
+    volatile LONG cancel;   /* != 0: abbrechen */
+    volatile LONG sent;     /* gesendete Bytes */
+    volatile LONG recvd;    /* empfangene Bytes */
+    LONG timeout;           /* Sekunden ohne Daten bis Abbruch, 0 = 120 */
+} NetCtl;
+
+/* hdrs: zusaetzliche Kopfzeilen, jede mit \r\n abgeschlossen (oder NULL) */
+BOOL net_https(const char *host, const char *method, const char *path,
+               const char *hdrs, const void *body, LONG blen,
+               NetResp *r, NetCtl *ctl);
+void net_free(NetResp *r);
+
+char *b64_encode(const UBYTE *src, LONG n, LONG *outlen);   /* malloc, nullterminiert */
+LONG  b64_decode(const char *src, LONG n, UBYTE *dst);      /* dst >= n*3/4, liefert Laenge */
+
+/* Wert zu einem Pfad wie "choices.0.message.images.0.image_url.url";
+ * liefert Zeiger auf den Rohwert (bei Strings ab dem ") und dessen Laenge */
+const char *json_get(const char *js, const char *path, LONG *len);
+/* String-Wert (inkl. ") entschluesseln, dst nullterminiert; liefert Laenge */
+LONG json_str(const char *v, LONG vlen, char *dst, LONG dmax);
+/* JSON-String-Escape von src nach dst (ohne Anfuehrungszeichen), dst nullterminiert */
+LONG json_esc(const char *src, char *dst, LONG dmax);
+
+#endif
