@@ -10,138 +10,226 @@
 <table width="100%" cellpadding="8" cellspacing="0" border="0">
 <tr><td bgcolor="#1e1e1e">
 <font size="+3"><b>AmiPixelShop</b></font><br>
-<font color="#9a9a9a">Layer-based image editor for AmigaOS 3.2 &nbsp;-&nbsp; Version 0.4 Early Beta &nbsp;-&nbsp; User Guide</font>
+<font color="#9a9a9a">Layer-based image editor for AmigaOS 3.2 &nbsp;-&nbsp; Version 0.5 Early Beta &nbsp;-&nbsp; User Guide</font>
 </td></tr>
 </table>
 
-<p><img src="images/overview.jpg" width="640" height="360" alt="AmiPixelShop at 1920x1080"></p>
+<p><img src="images/overview.jpg" width="800" height="450" alt="AmiPixelShop at 1920x1080"></p>
 
-<h3>Contents</h3>
+<!-- ======================================================= CONTENTS -->
+<h2>Contents</h2>
+<table border="0" cellpadding="4" cellspacing="0">
+<tr>
+<td valign="top" width="50%">
+<b>Part I - Getting started</b>
 <ol>
-<li><a href="#about">About</a>
+<li><a href="#about">About AmiPixelShop</a>
 <li><a href="#req">Requirements</a>
-<li><a href="#install">Installation</a>
-<li><a href="#start">First start and screen mode</a>
-<li><a href="#new">New document</a>
+<li><a href="#install">Installation and first start</a>
 <li><a href="#ui">The workspace</a>
+<li><a href="#docs">Documents: new, open, save</a>
+</ol>
+<b>Part II - Editing</b>
+<ol start="6">
 <li><a href="#tools">Tools</a>
+<li><a href="#select">Selections</a>
 <li><a href="#layers">Layers, groups and masks</a>
 <li><a href="#props">Properties panel</a>
-<li><a href="#select">Selections</a>
 <li><a href="#type">Type</a>
 <li><a href="#pen">Pen tool and paths</a>
+<li><a href="#transform">Transform and Liquify</a>
 <li><a href="#adjust">Adjustments and filters</a>
+</ol>
+</td>
+<td valign="top" width="50%">
+<b>Part III - AI features</b>
+<ol start="14">
+<li><a href="#ai">Overview and setup</a>
+<li><a href="#aibar">The contextual task bar</a>
+<li><a href="#aifill">Generative Fill</a>
+<li><a href="#airemove">Remove objects</a>
+<li><a href="#aiextend">Extend the image (outpainting)</a>
+<li><a href="#aisubject">Select Subject and Remove Background</a>
+<li><a href="#aigen">Generative layers and variants</a>
+<li><a href="#aisettings">AI settings, costs and tips</a>
+</ol>
+<b>Part IV - Amiga</b>
+<ol start="22">
 <li><a href="#amiga">Amiga colors and IFF</a>
+</ol>
+<b>Part V - Reference</b>
+<ol start="23">
 <li><a href="#files">File formats</a>
 <li><a href="#keys">Keyboard shortcuts</a>
+<li><a href="#prefs">Settings files</a>
 <li><a href="#limits">Known limitations</a>
 <li><a href="#bugs">Reporting bugs</a>
 <li><a href="#credits">License and credits</a>
 </ol>
+</td>
+</tr>
+</table>
 
+<!-- ======================================================= PART I -->
 <hr>
+<table width="100%" cellpadding="6" cellspacing="0" border="0"><tr><td bgcolor="#1e1e1e">
+<font size="+2"><b>Part I - Getting started</b></font></td></tr></table>
+
 <a name="about"></a>
-<h2>1. About</h2>
+<h2>1. About AmiPixelShop</h2>
 <p>AmiPixelShop is a modern, layer-based image editor written natively for the Amiga.
 It is <b>not</b> a port and nothing was reverse-engineered: every function was rebuilt from
 scratch in C and 68k assembler, modelled on the workflow of today's professional image editors.</p>
+<p>Highlights:</p>
+<ul>
+<li>Layers, groups, layer masks, clipping masks, adjustment layers and layer styles
+<li>Selection tools including Quick Selection and Color Range, Pen tool with paths
+<li>Editable type with TrueType fonts
+<li>Retouching: Clone Stamp, Spot Healing, Dodge/Burn, Liquify
+<li><b>AI features</b>: Generative Fill, Remove, Extend, Select Subject, Remove Background
+<li>Amiga colors: optimal palettes for OCS/ECS/AGA, EHB and HAM, IFF ILBM import and export
+<li>Opens PSD files with layers
+</ul>
 <p>This is an <b>early beta</b>. Expect bugs - and please report them (see <a href="#bugs">Reporting bugs</a>).</p>
 
 <hr>
 <a name="req"></a>
 <h2>2. Requirements</h2>
-<table border="0" cellpadding="4" cellspacing="0">
-<tr><td valign="top"><b>CPU</b></td><td><b>PiStorm</b> (Emu68, JIT-emulated 68040 with FPU) - recommended and tested.<br>
+<table border="1" cellpadding="4" cellspacing="0" bordercolor="#444444">
+<tr><td valign="top" bgcolor="#1e1e1e"><b>CPU</b></td><td><b>PiStorm</b> (Emu68, JIT-emulated 68040 with FPU) - recommended and tested.<br>
 A real 68060 with FPU might work, but will be slow at high resolutions (untested).</td></tr>
-<tr><td valign="top"><b>Graphics</b></td><td>RTG (Picasso96 / P96) with a 24 or 32 bit screen mode.<br>
-Supported resolutions: 1024&times;600 up to 1920&times;1080.</td></tr>
-<tr><td valign="top"><b>OS</b></td><td>AmigaOS 3.2 (tested with 3.2.3).</td></tr>
-<tr><td valign="top"><b>Memory</b></td><td>At least 128 MB Fast RAM, more for large images. A layer of 1920&times;1080 needs about 8 MB.</td></tr>
-<tr><td valign="top"><b>Tested on</b></td><td>Amiga 500 + PiStorm (Raspberry Pi 3A+, Emu68), AmigaOS 3.2.3, P96.</td></tr>
+<tr><td valign="top" bgcolor="#1e1e1e"><b>Graphics</b></td><td>RTG (Picasso96 / P96) with a 24 or 32 bit screen mode,
+1024&times;600 up to 1920&times;1080.</td></tr>
+<tr><td valign="top" bgcolor="#1e1e1e"><b>OS</b></td><td>AmigaOS 3.2 (tested with 3.2.3).</td></tr>
+<tr><td valign="top" bgcolor="#1e1e1e"><b>Memory</b></td><td>At least 128 MB Fast RAM, more for large images.
+A layer of 1920&times;1080 needs about 8 MB.</td></tr>
+<tr><td valign="top" bgcolor="#1e1e1e"><b>For the AI features</b></td><td>A TCP/IP stack (Roadshow), <b>AmiSSL v5</b>,
+an internet connection and an <a href="#ai">OpenRouter API key</a>. Everything else works without them.</td></tr>
+<tr><td valign="top" bgcolor="#1e1e1e"><b>Tested on</b></td><td>Amiga 500 + PiStorm (Raspberry Pi, Emu68), AmigaOS 3.2.3, P96, Roadshow, AmiSSL 5.27.</td></tr>
 </table>
 
 <hr>
 <a name="install"></a>
-<h2>3. Installation</h2>
+<h2>3. Installation and first start</h2>
 <ol>
 <li>Unpack the archive anywhere, e.g. <tt>Work:</tt>. You get a drawer <tt>AmiPixelShop</tt>.
-<li>Start <tt>AmiPixelShop</tt> from Workbench or from the Shell.<br>
-From the Shell you can pass an image: <tt>AmiPixelShop Work:Pictures/photo.jpg</tt>
+<li>Start <tt>AmiPixelShop</tt> from Workbench (also with Shift-click on picture icons) or from the Shell,
+optionally with pictures: <tt>AmiPixelShop Work:Pictures/photo.jpg</tt>
+<li>On the first start a <b>screen mode requester</b> appears. Choose an RTG mode with 24 or 32 bit.
+AmiPixelShop opens its own screen for maximum speed. Change it later with <b>Edit &gt; Screen Mode...</b>
 <li>For the <b>Type tool</b> you need TrueType fonts (<tt>.ttf</tt> / <tt>.otf</tt>) in
 <tt>FONTS:truetype/</tt>, <tt>FONTS:_ttf/</tt> or in a <tt>Fonts</tt> drawer next to the program.
+<li>For the <b>AI features</b>: install AmiSSL v5 (Aminet: <tt>util/libs/AmiSSL-v5-OS3</tt>) and enter your
+key with <b>Edit &gt; AI API Key...</b> - see <a href="#ai">chapter 14</a>.
 </ol>
-<p>Preferences are stored in <tt>ENV:AmiPixelShop.prefs</tt> and <tt>ENVARC:AmiPixelShop.prefs</tt>.
-Delete these files to reset all settings.</p>
-
-<hr>
-<a name="start"></a>
-<h2>4. First start and screen mode</h2>
-<p>On the first start a screen mode requester appears. Choose an RTG mode with 24 or 32 bit
-(only suitable modes from 1024&times;600 to 1920&times;1080 are listed). AmiPixelShop opens its own screen
-for maximum speed. The choice is saved; change it any time with <b>Edit &gt; Screen Mode...</b> - the new mode is used immediately.</p>
-
-<hr>
-<a name="new"></a>
-<h2>5. New document</h2>
-<p><b>File &gt; New...</b> (Ctrl+N) opens the New Document dialog. Pick a preset from the tabs
-<i>Recent</i>, <i>Photo</i>, <i>Print</i>, <i>Web</i>, <i>Mobile</i>, <i>Film &amp; Video</i>, <b>Amiga</b> or <i>Saved</i>,
-or type your own size on the right. <b>Save Preset...</b> keeps your own sizes in the <i>Saved</i> tab.</p>
-<p><img src="images/newdoc.jpg" width="620" height="402" alt="New Document dialog with the Amiga presets"></p>
-<p>The <b>Amiga</b> tab has the classic screen formats: PAL and NTSC Lowres, Hires, Interlace and Overscan,
-Super-Hires, Productivity, AGA, EHB, HAM6 and HAM8, a Workbench icon and an RTG size.
-The <b>Color Mode</b> of such a document (for example <i>Amiga EHB (64 colors)</i>) is remembered:
-<b>Filter &gt; Amiga &gt; Reduce Colors</b> and the IFF export start with these settings.
-You always paint in full color - the colors are reduced at the end (see <a href="#amiga">Amiga colors and IFF</a>).</p>
 
 <hr>
 <a name="ui"></a>
-<h2>6. The workspace</h2>
+<h2>4. The workspace</h2>
 <table border="0" cellpadding="6" cellspacing="0">
 <tr>
 <td valign="top"><img src="images/toolbar.jpg" width="40" height="680" alt="Toolbar"></td>
 <td valign="top">
-<p><b>Menu bar</b> (top) - all commands. Entries that cannot be used right now are greyed out.
-Menus are opened with a click (not with the right mouse button).</p>
-<p><b>Options bar</b> (below the menu) - settings of the current tool:</p>
-<p><img src="images/typebar.jpg" width="900" height="34" alt="Options bar of the Type tool"></p>
-<p><b>Toolbar</b> (left) - all tools. A small triangle means there are more tools in the same slot:
-hold the mouse button or click with the right button to choose. Hover over a tool to see a short tooltip.
-With <b>Edit &gt; Toolbar...</b> you choose which tools are shown.</p>
-<p>Below the tools: foreground and background color. Click to open the Color Picker,
-<tt>X</tt> swaps them, <tt>D</tt> resets to black/white.</p>
-<p><b>Document tabs</b> - several images can be open at once. <tt>Ctrl+Tab</tt> switches.</p>
-<p><b>Panels</b> (right) - Color/Swatches, <a href="#props">Properties</a> and Layers/History.</p>
-<p><b>Status bar</b> (bottom) - zoom, document size, redraw time and messages.</p>
-<p><b>Navigation</b>: hold <tt>Space</tt> and drag to scroll, click the zoom field in the status bar to type a zoom value, mouse wheel or <tt>Ctrl++</tt> / <tt>Ctrl+-</tt> to zoom,
+<table border="1" cellpadding="4" cellspacing="0" bordercolor="#444444">
+<tr><td valign="top" bgcolor="#1e1e1e"><b>Menu bar</b></td><td>All commands. Entries that cannot be used right now are greyed out.
+Menus open with a click.</td></tr>
+<tr><td valign="top" bgcolor="#1e1e1e"><b>Options bar</b></td><td>Settings of the current tool, below the menu.<br>
+<img src="images/typebar.jpg" width="640" height="24" alt="Options bar of the Type tool"></td></tr>
+<tr><td valign="top" bgcolor="#1e1e1e"><b>Toolbar</b></td><td>All tools (left). A small triangle means more tools in the same slot:
+hold the mouse button or right-click to choose. <b>Edit &gt; Toolbar...</b> chooses which tools are shown.
+Below the tools: foreground and background color - click to open the Color Picker, <tt>X</tt> swaps, <tt>D</tt> resets.</td></tr>
+<tr><td valign="top" bgcolor="#1e1e1e"><b>Document tabs</b></td><td>Several images can be open at once. <tt>Ctrl+Tab</tt> switches.</td></tr>
+<tr><td valign="top" bgcolor="#1e1e1e"><b>Panels</b></td><td>Right side: Color/Swatches, <a href="#props">Properties</a> and Layers/History/Paths.</td></tr>
+<tr><td valign="top" bgcolor="#1e1e1e"><b>Task bar</b></td><td>Floating bar below the image with the <a href="#aibar">AI functions</a>.
+Hide it with <b>Window &gt; Contextual Task Bar</b>.</td></tr>
+<tr><td valign="top" bgcolor="#1e1e1e"><b>Status bar</b></td><td>Zoom (click to type a value), document size, redraw time and messages.</td></tr>
+</table>
+<p><b>Navigation</b>: hold <tt>Space</tt> and drag to scroll; mouse wheel or <tt>Ctrl++</tt> / <tt>Ctrl+-</tt> to zoom;
 <tt>Ctrl+0</tt> fits the image, <tt>Ctrl+1</tt> shows 100%.</p>
 </td>
 </tr>
 </table>
 
 <hr>
+<a name="docs"></a>
+<h2>5. Documents: new, open, save</h2>
+<p><b>File &gt; New...</b> (Ctrl+N) opens the New Document dialog. Pick a preset from the tabs
+<i>Recent</i>, <i>Photo</i>, <i>Print</i>, <i>Web</i>, <i>Mobile</i>, <i>Film &amp; Video</i>, <b>Amiga</b> or <i>Saved</i>,
+or type your own size on the right. <b>Save Preset...</b> keeps your own sizes in the <i>Saved</i> tab.</p>
+<p><img src="images/newdoc.jpg" width="620" height="402" alt="New Document dialog with the Amiga presets"></p>
+<p>The <b>Amiga</b> tab has the classic screen formats: PAL and NTSC Lowres, Hires, Interlace and Overscan,
+Super-Hires, Productivity, AGA, EHB, HAM6 and HAM8, a Workbench icon and an RTG size.
+The <b>Color Mode</b> of such a document is remembered for <a href="#amiga">Reduce Colors and the IFF export</a>.
+You always paint in full color - the colors are reduced at the end.</p>
+<ul>
+<li><b>Open</b> (Ctrl+O): AmiPixelShop, PSD, PNG, JPEG, IFF and everything your datatypes can read - see <a href="#files">File formats</a>.
+<li><b>Save</b> (Ctrl+S) keeps everything (layers, masks, text, paths, AI prompts) in the native <tt>.aps</tt> format.
+<b>Save As</b> with the ending <tt>.png</tt>, <tt>.jpg</tt> or <tt>.iff</tt> writes a flattened picture.
+<li><b>File &gt; New from Clipboard</b> and Copy/Paste work with the Amiga clipboard.
+<li><b>File &gt; Revert</b> (F12) goes back to the saved version.
+</ul>
+
+<!-- ======================================================= PART II -->
+<hr>
+<table width="100%" cellpadding="6" cellspacing="0" border="0"><tr><td bgcolor="#1e1e1e">
+<font size="+2"><b>Part II - Editing</b></font></td></tr></table>
+
 <a name="tools"></a>
-<h2>7. Tools</h2>
+<h2>6. Tools</h2>
+<p>The letter is the keyboard shortcut. Shift + letter cycles through the tools of the same slot.</p>
 <table border="1" cellpadding="4" cellspacing="0" bordercolor="#444444">
 <tr bgcolor="#1e1e1e"><th align="left">Tool</th><th>Key</th><th align="left">What it does</th></tr>
-<tr><td>Move</td><td align="center">V</td><td>Moves the layer, the group, several selected layers or only the selected pixels. Arrow keys: 1&nbsp;px, Shift: 10&nbsp;px. <b>Auto-Select</b> in the options bar picks the layer under the mouse (Ctrl+click toggles).</td></tr>
+<tr bgcolor="#333333"><td colspan="3"><b>Move and select</b></td></tr>
+<tr><td>Move</td><td align="center">V</td><td>Moves the layer, group, several selected layers or only the selected pixels. Arrow keys: 1&nbsp;px, Shift: 10&nbsp;px.
+<b>Auto-Select</b> picks the layer under the mouse (Ctrl+click toggles).</td></tr>
 <tr><td>Rectangular / Elliptical Marquee</td><td align="center">M</td><td>Rectangle or ellipse selection. Shift: add, Alt: subtract, Shift+Alt: intersect.</td></tr>
-<tr><td>Lasso / Polygonal Lasso</td><td align="center">L</td><td>Freehand selection, or straight segments (Return, a double-click or a click on the start point closes).</td></tr>
+<tr><td>Lasso / Polygonal Lasso</td><td align="center">L</td><td>Freehand selection, or straight segments (Return, double-click or a click on the start point closes).</td></tr>
 <tr><td>Quick Selection / Magic Wand</td><td align="center">W</td><td>Paint over an object and the selection snaps to its edges - or select by color with a tolerance.</td></tr>
 <tr><td>Crop</td><td align="center">C</td><td>Drag the frame or its handles, Return applies. The frame can also extend the canvas.</td></tr>
 <tr><td>Eyedropper</td><td align="center">I</td><td>Picks a color from the image (also Alt+click with the brush).</td></tr>
+<tr bgcolor="#333333"><td colspan="3"><b>Paint and retouch</b></td></tr>
 <tr><td>Brush</td><td align="center">B</td><td>Paints with the foreground color. Size, hardness, opacity, flow. <tt>,</tt> and <tt>.</tt> change the size. Shift+click draws a straight line.</td></tr>
 <tr><td>Clone Stamp</td><td align="center">S</td><td>Alt+click sets the source, then paint to copy.</td></tr>
 <tr><td>History Brush</td><td align="center">Y</td><td>Paints back an earlier state; choose the source in the History panel (left column).</td></tr>
-<tr><td>Spot Healing Brush</td><td align="center">J</td><td>Paint over a spot: it is replaced with texture from the surroundings.</td></tr>
+<tr><td>Spot Healing Brush</td><td align="center">J</td><td>Paint over a spot: it is replaced with texture from the surroundings.
+With <b>Generative AI</b> checked it removes whole objects - see <a href="#airemove">Remove objects</a>.</td></tr>
 <tr><td>Eraser</td><td align="center">E</td><td>Erases to transparency (in a mask: paints with the background color).</td></tr>
 <tr><td>Gradient / Paint Bucket</td><td align="center">G</td><td>Drag a gradient direction - or fill areas of similar color.</td></tr>
 <tr><td>Blur / Sharpen / Smudge</td><td align="center">R</td><td>Retouching with a brush.</td></tr>
 <tr><td>Dodge / Burn</td><td align="center">O</td><td>Lightens or darkens with a brush.</td></tr>
+<tr bgcolor="#333333"><td colspan="3"><b>Vector and type</b></td></tr>
 <tr><td>Pen</td><td align="center">P</td><td>Draws paths with corner and curve points. See <a href="#pen">Pen tool</a>.</td></tr>
 <tr><td>Horizontal Type</td><td align="center">T</td><td>Editable text. See <a href="#type">Type</a>.</td></tr>
 <tr><td>Shape</td><td align="center">U</td><td>Rectangle, ellipse or line with fill and stroke - each shape on its own layer.</td></tr>
+<tr bgcolor="#333333"><td colspan="3"><b>Navigate</b></td></tr>
 <tr><td>Hand</td><td align="center">H</td><td>Scrolls the view (or hold Space).</td></tr>
 <tr><td>Zoom</td><td align="center">Z</td><td>Click zooms in, Alt+click zooms out.</td></tr>
+</table>
+
+<hr>
+<a name="select"></a>
+<h2>7. Selections</h2>
+<table border="0" cellpadding="6" cellspacing="0">
+<tr>
+<td valign="top"><img src="images/menu_select.jpg" width="190" height="300" alt="Select menu"></td>
+<td valign="top">
+<ul>
+<li><b>Tools</b>: Marquee, Lasso, Quick Selection and Magic Wand (see <a href="#tools">Tools</a>).
+<li><b>Select &gt; Subject</b> - the AI finds the main subject (see <a href="#aisubject">chapter 19</a>).
+<li><b>Select &gt; Color Range...</b> - selects by color with fuzziness, with live preview.
+<li><b>Select &gt; Grow / Similar</b> - extends the selection to similar colors (Magic Wand tolerance).
+<li><b>Select &gt; Modify</b> - Feather (Shift+F6), Expand, Contract.
+<li><b>Select &gt; Inverse</b> (Shift+Ctrl+I), <b>Deselect</b> (Ctrl+D), <b>Reselect</b> (Shift+Ctrl+D).
+</ul>
+<p>What you can do with a selection:</p>
+<ul>
+<li><b>Edit &gt; Fill...</b> and <b>Edit &gt; Stroke...</b> (inside, center or outside).
+<li>Ctrl+J copies it to a new layer, Shift+Ctrl+J cuts it.
+<li>Filters and adjustments only work inside it.
+<li><b>Generative Fill</b> and <b>Remove</b> from the <a href="#aibar">task bar</a>.
+</ul>
+</td>
+</tr>
 </table>
 
 <hr>
@@ -149,186 +237,431 @@ With <b>Edit &gt; Toolbar...</b> you choose which tools are shown.</p>
 <h2>8. Layers, groups and masks</h2>
 <table border="0" cellpadding="6" cellspacing="0">
 <tr>
-<td valign="top"><img src="images/panels.jpg" width="260" height="640" alt="Color, Properties and Layers panels"></td>
+<td valign="top"><img src="images/panels.jpg" width="258" height="500" alt="Color, Properties and Layers panels"></td>
 <td valign="top">
-<p><b>Layers panel</b>: click the eye to show/hide a layer, click a row to make it active,
-drag rows to change the order or to drop a layer into a group. Double-click the name to rename.</p>
-<p>Each layer has a <b>blend mode</b> (Normal, Multiply, Screen, Overlay, Soft Light, Color, ... 25 modes),
-<b>Opacity</b> and <b>Fill</b>. <b>Lock</b>: transparency, pixels, position or all.</p>
-<p><b>Several layers</b>: Ctrl+click adds a layer to the selection, Shift+click selects a range,
-<b>Select &gt; All Layers</b> (Alt+Ctrl+A) selects all. Selected layers can be moved,
-grouped (Ctrl+G), merged (Ctrl+E) or deleted together.</p>
-<p><b>Groups</b> (Ctrl+G): fold open/closed with the triangle, blend mode <i>Pass Through</i> or isolated, with opacity and mask.</p>
-<p><b>Layer masks</b>: button at the bottom of the panel or <b>Layer &gt; Layer Mask</b>.
-Click the mask thumbnail to paint into the mask (black hides, white shows),
-Shift+click disables it. The small <b>chain</b> between the thumbnails links layer and mask -
-they move together. Click the chain to unlink them.</p>
-<p><b>Clipping masks</b> (Alt+Ctrl+G): a layer is only visible where the layer below has pixels.</p>
-<p><b>Adjustment layers</b> (round button at the bottom, or <b>Layer &gt; New Adjustment Layer</b>):
-non-destructive Brightness/Contrast, Levels, Curves, Hue/Saturation, Desaturate, Invert, Threshold, Posterize.</p>
-<p><b>Layer styles</b> (fx button): Drop Shadow, Outer Glow, Stroke.</p>
-<p><img src="images/layerstyle.jpg" width="382" height="562" alt="Layer Style dialog"></p>
+<h3>Layers panel</h3>
+<ul>
+<li>Click the eye to show/hide, click a row to make it active, double-click the name to rename.
+<li>Drag rows to change the order or to drop a layer into a group.
+<li>Each layer has a <b>blend mode</b> (25 modes: Multiply, Screen, Overlay, Soft Light, Color, ...),
+<b>Opacity</b> and <b>Fill</b>. <b>Lock</b>: transparency, pixels, position or all.
+<li><b>Several layers</b>: Ctrl+click adds, Shift+click selects a range, <b>Select &gt; All Layers</b> (Alt+Ctrl+A).
+Selected layers can be moved, grouped, merged or deleted together.
+</ul>
+<h3>Groups</h3>
+<p>Ctrl+G groups the selected layers. Fold with the triangle. Blend mode <i>Pass Through</i> or isolated, with opacity and mask.</p>
+<h3>Layer masks</h3>
+<ul>
+<li>Add with the mask button at the bottom of the panel or <b>Layer &gt; Layer Mask</b>.
+<li>Click the mask thumbnail to paint into the mask: black hides, white shows.
+<li><b>Shift+click</b> the mask thumbnail disables/enables it (or <i>Disable</i> in the Properties panel).
+<li>The small <b>chain</b> between the thumbnails links layer and mask - click it to unlink.
+</ul>
+<h3>More layer types</h3>
+<ul>
+<li><b>Clipping masks</b> (Alt+Ctrl+G): a layer is only visible where the layer below has pixels.
+<li><b>Adjustment layers</b> (round button, or <b>Layer &gt; New Adjustment Layer</b>): non-destructive
+Brightness/Contrast, Levels, Curves, Hue/Saturation, Desaturate, Invert, Threshold, Posterize.
+<li><b>Layer styles</b> (fx button): Drop Shadow, Outer Glow, Stroke.
+<li><b>Generative layers</b>: results of the AI features, see <a href="#aigen">chapter 20</a>.
+</ul>
 </td>
 </tr>
 </table>
+<p><img src="images/layerstyle.jpg" width="382" height="562" alt="Layer Style dialog"></p>
 
 <hr>
 <a name="props"></a>
 <h2>9. Properties panel</h2>
-<p>Shows the settings of the active layer - click its header to fold it away:</p>
-<ul>
-<li><b>Adjustment layer</b>: its sliders, live. Curves: button <i>Edit Curves...</i>
-<li><b>Type layer</b>: size, tracking, leading and alignment
-<li><b>Pixel layer</b>: position and size, Free Transform, Flip
-<li><b>Group</b>: number of layers, Ungroup, Merge Group
-<li><b>Layer mask</b>: Invert, Apply, Disable/Enable, Delete
-</ul>
-
-<hr>
-<a name="select"></a>
-<h2>10. Selections</h2>
-<ul>
-<li>Marquee, Lasso, Quick Selection and Magic Wand tools (see <a href="#tools">Tools</a>).
-<li><b>Select &gt; Color Range...</b> - selects by color with fuzziness, with live preview.
-<li><b>Select &gt; Grow / Similar</b> - extends the selection to similar colors (uses the Magic Wand tolerance).
-<li><b>Select &gt; Modify</b> - Feather, Expand, Contract.
-<li><b>Select &gt; Inverse</b> (Shift+Ctrl+I), <b>Reselect</b> (Shift+Ctrl+D).
-<li><b>Edit &gt; Fill...</b> and <b>Edit &gt; Stroke...</b> (inside, center or outside).
-<li>Ctrl+J copies the selection to a new layer, Shift+Ctrl+J cuts it.
-</ul>
+<p>Shows the settings of the active layer. Click its header to fold it away.</p>
+<table border="1" cellpadding="4" cellspacing="0" bordercolor="#444444">
+<tr bgcolor="#1e1e1e"><th align="left">Active layer</th><th align="left">Shown</th></tr>
+<tr><td>Pixel layer</td><td>Position and size, Free Transform, Flip H / Flip V</td></tr>
+<tr><td>Type layer</td><td>Size, tracking, leading and alignment</td></tr>
+<tr><td>Adjustment layer</td><td>Its sliders, live. Curves: button <i>Edit Curves...</i></td></tr>
+<tr><td>Group</td><td>Number of layers, Ungroup, Merge Group</td></tr>
+<tr><td>Generative layer</td><td>Prompt, variants <tt>&lt; 1 / 2 &gt;</tt>, Generate again (see <a href="#aigen">chapter 20</a>)</td></tr>
+<tr><td>Layer mask</td><td>Invert, Apply, Disable/Enable, Delete</td></tr>
+</table>
 
 <hr>
 <a name="type"></a>
-<h2>11. Type</h2>
-<p>Choose the Type tool, click into the image and type - or drag a box for <b>paragraph text</b> that wraps automatically. Return starts a new line,
-<b>Ctrl+Return</b> or the <i>Commit</i> button finishes, <b>Esc</b> cancels.
-Click an existing text with the Type tool to edit it again.</p>
-<p>Options bar and <b>Type</b> menu: font, size, alignment (left / center / right),
-anti-aliasing (Smooth, Sharp, None), <b>Character...</b> (tracking and leading), <b>Paste Lorem Ipsum</b>.
-<b>Layer &gt; Rasterize Type</b> turns text into pixels.</p>
+<h2>10. Type</h2>
+<ul>
+<li>Choose the Type tool and click into the image to type - or drag a box for <b>paragraph text</b> that wraps automatically.
+<li>Return starts a new line, <b>Ctrl+Return</b> or the <i>Commit</i> button finishes, <b>Esc</b> cancels.
+<li>Click an existing text with the Type tool to edit it again.
+<li>Options bar and <b>Type</b> menu: font, size, alignment, anti-aliasing (Smooth, Sharp, None),
+<b>Character...</b> (tracking and leading), <b>Paste Lorem Ipsum</b>.
+<li><b>Layer &gt; Rasterize Type</b> turns text into pixels.
+</ul>
 
 <hr>
 <a name="pen"></a>
-<h2>12. Pen tool and paths</h2>
+<h2>11. Pen tool and paths</h2>
 <p><img src="images/pen.jpg" width="520" height="340" alt="A path with a curve point"></p>
 <ul>
 <li><b>Click</b> sets a corner point, <b>drag</b> sets a curve point with handles.
 <li>Click the first point to close the path. <b>Return</b> ends an open path, <b>Backspace</b> removes the last point.
 <li>Drag points or handles to edit the path.
-<li>Options bar and <b>Paths</b> panel (third tab next to Layers and History):
-<b>Make Selection</b> (also Ctrl+Return), <b>Fill Path</b> (foreground color),
+<li>Options bar and <b>Paths</b> panel: <b>Make Selection</b> (Ctrl+Return), <b>Fill Path</b> (foreground color),
 <b>Stroke Path</b> (with the current brush), <b>Delete Path</b>.
-<li>Every path change can be undone and the path is saved in <tt>.aps</tt> files.
+<li>Path changes can be undone; the path is saved in <tt>.aps</tt> files.
 </ul>
 <p><img src="images/penbar.jpg" width="820" height="34" alt="Options bar of the Pen tool"></p>
 
 <hr>
-<a name="adjust"></a>
-<h2>13. Adjustments and filters</h2>
-<p><img src="images/menu.jpg" width="460" height="220" alt="Filter menu"></p>
-<p><b>Image &gt; Adjustments</b>: Brightness/Contrast, Levels (Ctrl+L), Curves (Ctrl+M), Hue/Saturation (Ctrl+U),
-Desaturate, Invert (Ctrl+I), Threshold, Posterize - all with live preview.</p>
-<p><b>Filter</b>: Box Blur, Gaussian Blur, Motion Blur, Add Noise, Median, Mosaic, Sharpen, Sharpen More,
-Unsharp Mask, Emboss, Find Edges, High Pass. Ctrl+F repeats the last filter.</p>
-<p><b>Filter &gt; Liquify...</b> (Shift+Ctrl+X) works directly on the canvas: <b>Forward Warp</b> pushes pixels,
+<a name="transform"></a>
+<h2>12. Transform and Liquify</h2>
+<ul>
+<li><b>Edit &gt; Free Transform</b> (Ctrl+T): scale, rotate, flip - Return applies, Esc cancels.
+The options bar switches between <b>Free</b>, <b>Distort</b> (move each corner freely),
+<b>Perspective</b> (the opposite corner follows) and <b>Warp</b> (bend the image with a 4&times;4 mesh).
+<li><b>Filter &gt; Liquify...</b> (Shift+Ctrl+X) works directly on the canvas: <b>Forward Warp</b> pushes pixels,
 <b>Reconstruct</b> paints the original back, <b>Pucker</b>, <b>Bloat</b> and <b>Twirl</b> keep working while you hold the mouse.
 Size and Pressure are in the options bar; Return applies, Esc cancels.
-With a selection, filters only work inside it. With a mask active, they work on the mask.</p>
-<p><b>Image</b>: Image Size, Canvas Size, Image Rotation (180&deg;, 90&deg;, arbitrary, flip canvas), Crop, Trim, Reveal All, Duplicate.</p>
-<p><b>Edit &gt; Transform / Free Transform</b> (Ctrl+T): scale, rotate, flip - Return applies, Esc cancels.
-While transforming, the options bar switches between <b>Free</b>, <b>Distort</b> (move each corner freely),
-<b>Perspective</b> (the opposite corner follows) and <b>Warp</b> (bend the image with a 4&times;4 mesh).</p>
-<p>Pixels moved outside the canvas are kept and come back with <b>Image &gt; Reveal All</b> or when moved back.</p>
+<li><b>Image</b>: Image Size, Canvas Size, Image Rotation (180&deg;, 90&deg;, arbitrary, flip canvas), Crop, Trim, Reveal All, Duplicate.
+<li>Pixels moved outside the canvas are kept and come back with <b>Image &gt; Reveal All</b> or when moved back.
+</ul>
 
 <hr>
+<a name="adjust"></a>
+<h2>13. Adjustments and filters</h2>
+<table border="0" cellpadding="6" cellspacing="0">
+<tr>
+<td valign="top"><img src="images/menu.jpg" width="460" height="220" alt="Filter menu"></td>
+<td valign="top">
+<p><b>Image &gt; Adjustments</b>: Brightness/Contrast, Levels (Ctrl+L), Curves (Ctrl+M), Hue/Saturation (Ctrl+U),
+Desaturate, Invert (Ctrl+I), Threshold, Posterize - all with live preview.
+For non-destructive work use <a href="#layers">adjustment layers</a>.</p>
+<p><b>Filter</b>: Box Blur, Gaussian Blur, Motion Blur, Add Noise, Median, Mosaic, Sharpen, Sharpen More,
+Unsharp Mask, Emboss, Find Edges, High Pass, Liquify. <b>Ctrl+F</b> repeats the last filter.</p>
+<p>With a selection, filters only work inside it. With a mask active, they work on the mask.</p>
+<p><b>Filter &gt; Amiga</b>: Reduce Colors and palettes, see <a href="#amiga">chapter 22</a>.</p>
+</td>
+</tr>
+</table>
+
+<!-- ======================================================= PART III -->
+<hr>
+<table width="100%" cellpadding="6" cellspacing="0" border="0"><tr><td bgcolor="#1e1e1e">
+<font size="+2"><b>Part III - AI features</b></font></td></tr></table>
+
+<a name="ai"></a>
+<h2>14. Overview and setup</h2>
+<p>AmiPixelShop can use current image AI models to fill, remove, extend and cut out image content -
+directly from the Amiga, over an encrypted connection.</p>
+<table border="1" cellpadding="4" cellspacing="0" bordercolor="#444444">
+<tr bgcolor="#1e1e1e"><th align="left">Function</th><th align="left">Where</th><th align="left">Result</th></tr>
+<tr><td><a href="#aifill">Generative Fill</a></td><td>Task bar, Edit menu</td><td>New content in the selection, from your description</td></tr>
+<tr><td><a href="#airemove">Remove</a></td><td>Task bar, Edit menu, Spot Healing Brush</td><td>Objects disappear, the background is continued</td></tr>
+<tr><td><a href="#aiextend">Extend</a></td><td>Task bar on empty canvas</td><td>The image is continued into transparent areas</td></tr>
+<tr><td><a href="#aisubject">Select Subject</a></td><td>Task bar, Select menu</td><td>Selection of the main subject</td></tr>
+<tr><td><a href="#aisubject">Remove Background</a></td><td>Task bar, Layer menu</td><td>Layer mask that hides the background</td></tr>
+</table>
+<p>The work is done by models on the internet. AmiPixelShop sends only the part of the image that is needed,
+and puts the result back <b>only inside your selection</b> on a new layer - the rest of the picture stays
+pixel-identical and the original layer is never changed.</p>
+
+<h3>What you need</h3>
+<ol>
+<li><b>Roadshow</b> (bsdsocket.library) and <b>AmiSSL v5</b> (Aminet: <tt>util/libs/AmiSSL-v5-OS3</tt>).
+<li>An account at <b>openrouter.ai</b> with some credit. OpenRouter gives access to many image models with one key.
+Create a key under <i>Keys</i>; it is a good idea to set a <b>credit limit</b> for it (for example 5 $).
+<li>Enter the key in AmiPixelShop: <b>Edit &gt; AI API Key...</b>, paste or type it, press Return.
+AmiPixelShop stores it in <tt>ENVARC:AmiPixelShop/openrouter.key</tt>, checks it at once and shows
+how much has been used and how much of the limit is left.
+</ol>
+
+<h3>Costs and privacy</h3>
+<ul>
+<li>One request costs about <b>3.4 to 4 US cents</b> with the default models (Nano Banana Pro: about 13 cents).
+The status bar shows the cost of every request and the total of the session.
+<li>A request takes about <b>10 to 15 seconds</b>. You can keep working meanwhile.
+<li>The selected part of the image is sent to OpenRouter and the model provider (Google). Do not use the AI features
+for pictures that must stay private.
+</ul>
+
+<hr>
+<a name="aibar"></a>
+<h2>15. The contextual task bar</h2>
+<p>Like in today's image editors, a small bar floats below the image and offers the AI functions that fit the moment:</p>
+<table border="1" cellpadding="6" cellspacing="0" bordercolor="#444444">
+<tr bgcolor="#1e1e1e"><th align="left">Situation</th><th align="left">Task bar</th></tr>
+<tr><td valign="top">No selection<br><font color="#9a9a9a">(Move or selection tool active)</font></td>
+<td><img src="images/ai_nosel.jpg" width="500" height="116" alt="Task bar without selection"><br>
+<b>Select Subject</b> and <b>Remove Background</b></td></tr>
+<tr><td valign="top">With a selection</td>
+<td><img src="images/ai_taskbar.jpg" width="230" height="438" alt="Task bar below a selection"><br>
+<b>Generative Fill</b> and <b>Remove</b></td></tr>
+<tr><td valign="top">While the AI works</td>
+<td><img src="images/ai_generating.jpg" width="262" height="44" alt="Generating..."><br>
+Seconds so far; <b>Cancel</b> stops the request. You can keep working.</td></tr>
+</table>
+<p>The bar always stays outside the image (below it, above it if there is no room, else at the bottom of the window).
+<b>Window &gt; Contextual Task Bar</b> hides or shows it; all functions are also in the menus:</p>
+<table border="0" cellpadding="6" cellspacing="0">
+<tr>
+<td valign="top"><img src="images/menu_edit.jpg" width="228" height="494" alt="Edit menu with the AI entries"></td>
+<td valign="top"><img src="images/menu_layer.jpg" width="300" height="490" alt="Layer menu with Remove Background"></td>
+</tr>
+</table>
+
+<hr>
+<a name="aifill"></a>
+<h2>16. Generative Fill</h2>
+<table border="0" cellpadding="6" cellspacing="0">
+<tr>
+<td valign="top"><img src="images/ai_prompt.jpg" width="520" height="456" alt="Generative Fill with a prompt"></td>
+<td valign="top">
+<ol>
+<li>Select an area with any selection tool. A rough rectangle is fine.
+<li>Click <b>Generative Fill</b> in the task bar (or <b>Edit &gt; Generative Fill...</b>).
+<li>Describe what should appear, in English works best, for example
+<i>a small brown dog sitting in the grass</i>.
+<li>Press <b>Return</b> or click <b>Generate</b>.
+</ol>
+<p>After about 10-15 seconds the result appears on a new layer named <i>Gen: ...</i> with your selection as
+layer mask - the original is untouched. Light, perspective and colors are matched to the picture.</p>
+<p>Leave the description <b>empty</b> to fill the area so that it fits the surroundings.</p>
+</td>
+</tr>
+</table>
+
+<hr>
+<a name="airemove"></a>
+<h2>17. Remove objects</h2>
+<h3>With a selection</h3>
+<p>Select the object - generously, including its shadow - and click <b>Remove</b> in the task bar
+(or <b>Edit &gt; Generative Remove</b>).</p>
+<table border="0" cellpadding="6" cellspacing="0">
+<tr>
+<td align="center"><img src="images/ai_remove_a.jpg" width="300" height="438" alt="Before: lamp post selected"><br>Before</td>
+<td align="center"><img src="images/ai_remove_b.jpg" width="300" height="438" alt="After: lamp post removed"><br>After</td>
+</tr>
+</table>
+
+<h3>With the brush</h3>
+<p>Choose the <b>Spot Healing Brush</b> (J) and check <b>Generative AI</b> in the options bar:</p>
+<p><img src="images/ai_brushbar.jpg" width="620" height="30" alt="Options bar: Generative AI"></p>
+<p>Paint over the object - the stroke is shown in pink. When you release the mouse the object is removed.
+You do not have to cover it completely: parts next to the stroke that belong to the object are removed too.</p>
+<table border="0" cellpadding="6" cellspacing="0">
+<tr>
+<td align="center"><img src="images/ai_brush.jpg" width="400" height="280" alt="Pink stroke over the dog"><br>Paint over it</td>
+<td align="center"><img src="images/ai_brush_b.jpg" width="400" height="280" alt="Dog removed"><br>Result</td>
+</tr>
+</table>
+
+<hr>
+<a name="aiextend"></a>
+<h2>18. Extend the image (outpainting)</h2>
+<ol>
+<li>Make the canvas larger: <b>Image &gt; Canvas Size...</b> or drag the <b>Crop</b> frame beyond the image.
+The new area is transparent.
+<li>Select the empty area, ideally with a little overlap into the picture - or everything (Ctrl+A).
+<li>Click <b>Remove</b> (no description) to continue the scene, or <b>Generative Fill</b> with a description of what should be there.
+</ol>
+<table border="0" cellpadding="6" cellspacing="0">
+<tr>
+<td align="center"><img src="images/ai_extend_a.jpg" width="420" height="236" alt="Picture on a larger, transparent canvas"><br>Before: larger canvas</td>
+<td align="center"><img src="images/ai_extend_b.jpg" width="420" height="236" alt="Picture extended"><br>After: road, hills and sky continued</td>
+</tr>
+</table>
+
+<hr>
+<a name="aisubject"></a>
+<h2>19. Select Subject and Remove Background</h2>
+<table border="0" cellpadding="6" cellspacing="0">
+<tr>
+<td align="center"><img src="images/ai_subject.jpg" width="400" height="377" alt="Select Subject"><br><b>Select &gt; Subject</b></td>
+<td align="center"><img src="images/ai_rmbg.jpg" width="400" height="377" alt="Remove Background"><br><b>Layer &gt; Remove Background</b></td>
+</tr>
+</table>
+<ul>
+<li><b>Select Subject</b> creates a selection of the main subject - with fine edges, also in hair and fur.
+Use it for Ctrl+J, filters, adjustments or as a starting point for further selection work.
+<li><b>Remove Background</b> adds a <b>layer mask</b> to the active layer that hides the background.
+Nothing is deleted: <i>Disable</i> the mask to see everything again, paint into the mask to correct it,
+or <i>Apply</i> it to remove the background for good.
+<li>Both are in the task bar when nothing is selected. Remove Background needs a pixel layer without a mask.
+</ul>
+
+<hr>
+<a name="aigen"></a>
+<h2>20. Generative layers and variants</h2>
+<table border="0" cellpadding="6" cellspacing="0">
+<tr>
+<td valign="top"><img src="images/ai_props.jpg" width="258" height="472" alt="Properties of a generative layer"></td>
+<td valign="top">
+<p>Every Generative Fill, Remove or Extend creates a <b>generative layer</b> (<i>Gen: ...</i>).
+When it is active, the Properties panel shows:</p>
+<ul>
+<li>the description you used,
+<li><b>&lt; 1 / 2 &gt;</b> - flip through the variants,
+<li><b>Generate again</b> - asks the AI for one more variant of the same area with the same description.
+</ul>
+<p>Up to six variants are kept while the document is open. The shown variant is what you see and what is saved.
+Description and type of the layer are saved in <tt>.aps</tt> files, so <i>Generate again</i> also works later.</p>
+<p>Generative layers are normal pixel layers with a mask: move them, change opacity, paint into the mask
+to blend the edge, or merge them down when you are done.</p>
+</td>
+</tr>
+</table>
+
+<hr>
+<a name="aisettings"></a>
+<h2>21. AI settings, costs and tips</h2>
+<p><b>Edit &gt; AI Settings...</b></p>
+<p><img src="images/ai_settings.jpg" width="466" height="184" alt="AI Settings dialog"></p>
+<table border="1" cellpadding="4" cellspacing="0" bordercolor="#444444">
+<tr><td valign="top" bgcolor="#1e1e1e"><b>Fill model</b></td><td>Used for Generative Fill with a description.
+<b>Nano Banana 2.1</b> (default, about 4 cents), <b>Nano Banana Pro</b> (best quality, about 13 cents, slower),
+<b>Flash Lite</b> (fastest, simpler results).</td></tr>
+<tr><td valign="top" bgcolor="#1e1e1e"><b>Remove/Extend</b></td><td>Used for Remove, Extend, Select Subject and Remove Background.
+<b>Flash Lite</b> (default, fast, about 3.4 cents) or Nano Banana 2.1.</td></tr>
+<tr><td valign="top" bgcolor="#1e1e1e"><b>Variants</b></td><td>1, 2 or 3 variants per Generative Fill. Each variant is a separate request and costs extra.</td></tr>
+</table>
+
+<h3>Tips</h3>
+<ul>
+<li><b>Select generously</b>: include shadows and reflections of an object you want to remove.
+<li><b>Small areas</b>: AmiPixelShop automatically sends enough surroundings so the AI understands the scene.
+<li><b>Not happy?</b> Click <i>Generate again</i>, or paint into the mask of the generative layer to keep only the good parts.
+<li><b>Write descriptions in English</b> and describe the thing, not the action: <i>a red rowing boat</i> instead of <i>add a boat</i>.
+<li><b>Large changes</b>: several smaller steps often look better than one huge selection.
+</ul>
+
+<h3>Messages</h3>
+<table border="1" cellpadding="4" cellspacing="0" bordercolor="#444444">
+<tr bgcolor="#1e1e1e"><th align="left">Message</th><th align="left">Meaning</th></tr>
+<tr><td>No OpenRouter API key found</td><td>Enter your key with <b>Edit &gt; AI API Key...</b></td></tr>
+<tr><td>AmiSSL v5 not installed / No TCP/IP stack</td><td>Install AmiSSL v5 and start Roadshow.</td></tr>
+<tr><td>Certificate error</td><td>Check the date and time of your Amiga, update AmiSSL.</td></tr>
+<tr><td>... too similar to an existing image</td><td>The model refuses to reproduce well-known published photos. Try a larger selection or add a description.</td></tr>
+<tr><td>blocked by the model's safety filter</td><td>The model does not process this content.</td></tr>
+<tr><td>Timeout</td><td>No answer for a long time - check the network and try again.</td></tr>
+</table>
+
+<!-- ======================================================= PART IV -->
+<hr>
+<table width="100%" cellpadding="6" cellspacing="0" border="0"><tr><td bgcolor="#1e1e1e">
+<font size="+2"><b>Part IV - Amiga</b></font></td></tr></table>
+
 <a name="amiga"></a>
-<h2>14. Amiga colors and IFF</h2>
+<h2>22. Amiga colors and IFF</h2>
+<h3>Reduce Colors</h3>
 <p><b>Filter &gt; Amiga &gt; Reduce Colors...</b> builds the best palette for the image and shows the result live,
 together with the palette:</p>
 <p><img src="images/reduce.jpg" width="620" height="378" alt="Reduce Colors with a 32 color OCS palette"></p>
-<ul>
-<li><b>Palette</b>: <i>Adaptive</i> (24 bit colors, for AGA and RTG), <i>OCS 12-bit</i> (4 bit per channel, like OCS/ECS hardware),
+<table border="1" cellpadding="4" cellspacing="0" bordercolor="#444444">
+<tr><td valign="top" bgcolor="#1e1e1e"><b>Palette</b></td><td><i>Adaptive</i> (24 bit colors, for AGA and RTG), <i>OCS 12-bit</i> (4 bit per channel, like OCS/ECS hardware),
 <i>MagicWB</i> (the 8 MagicWB colors stay, the rest is chosen for the image), <i>Grayscale</i>
-or <i>Fixed</i> (a given palette, see below).
-<li><b>Mode</b>: <i>Normal</i> with 2 to 256 colors, <i>EHB</i> (32 colors plus 32 half-bright ones - both halves are optimized together),
-<i>HAM6</i> and <i>HAM8</i> (each pixel picks the best of a palette color or changing one channel of its left neighbour).
-<li><b>Dither</b>: <i>None</i>, <i>Floyd-Steinberg</i> (smoothest gradients), <i>Atkinson</i> (crisper, keeps more contrast)
-or <i>Ordered</i> (regular 8&times;8 pattern, good for animations). <b>Amount</b> sets the strength.
-<li><b>Optimize Palette</b> refines the palette further for the best match as the eye sees it.
-</ul>
+or <i>Fixed</i> (a given palette, see below).</td></tr>
+<tr><td valign="top" bgcolor="#1e1e1e"><b>Mode</b></td><td><i>Normal</i> with 2 to 256 colors, <i>EHB</i> (32 colors plus 32 half-bright ones - both halves are optimized together),
+<i>HAM6</i> and <i>HAM8</i> (each pixel picks the best of a palette color or changing one channel of its left neighbour).</td></tr>
+<tr><td valign="top" bgcolor="#1e1e1e"><b>Dither</b></td><td><i>None</i>, <i>Floyd-Steinberg</i> (smoothest gradients), <i>Atkinson</i> (crisper, keeps more contrast)
+or <i>Ordered</i> (regular 8&times;8 pattern, good for animations). <b>Amount</b> sets the strength.</td></tr>
+<tr><td valign="top" bgcolor="#1e1e1e"><b>Optimize Palette</b></td><td>Refines the palette further for the best match as the eye sees it.</td></tr>
+</table>
+
+<h3>IFF export</h3>
 <p><b>File &gt; Export as IFF ILBM...</b> writes a standard IFF picture (also <b>Save As</b> with the ending <tt>.iff</tt>):
 with the palette of the last <i>Reduce Colors</i>, or reduced automatically to the color mode of the document.
 The screen mode (Lowres/Hires, Interlace, EHB, HAM) is stored in the file, so viewers and paint programs show it correctly.
 The palette and settings are also saved in <tt>.aps</tt> files.</p>
-<p><b>Fixed palettes</b> - for graphics that must fit an existing picture or game:
-<b>Filter &gt; Amiga &gt; Load Palette...</b> takes the palette of any IFF picture or palette file and opens
-<i>Reduce Colors</i> with <i>Palette: Fixed</i>, so you see at once how the image looks with these colors.
-<b>Use Current Palette as Fixed</b> keeps the palette of the last reduction for further images,
-<b>Save Palette...</b> writes it as an IFF palette file (as DPaint does). The fixed palette is saved in <tt>.aps</tt> files.</p>
-<p><b>Brushes</b>: transparent areas are kept. With transparency, color 0 is reserved for transparent pixels
-(the usual DPaint brush), the export stores it as transparent color. For HAM, or when a palette has no free entry,
-a mask plane is written instead. IFF brushes with a transparent color or a mask plane open with their transparency.</p>
-<p>IFF pictures from other programs open with their palette and mode: 1 to 8 bitplanes, EHB, HAM6, HAM8, 24 bit,
-mask plane and DPaint PBM. Opened, edited and exported again, the palette stays the same.</p>
 
+<h3>Fixed palettes</h3>
+<p>For graphics that must fit an existing picture or game:</p>
+<ul>
+<li><b>Filter &gt; Amiga &gt; Load Palette...</b> takes the palette of any IFF picture or palette file and opens
+<i>Reduce Colors</i> with <i>Palette: Fixed</i>, so you see at once how the image looks with these colors.
+<li><b>Use Current Palette as Fixed</b> keeps the palette of the last reduction for further images.
+<li><b>Save Palette...</b> writes it as an IFF palette file (as DPaint does).
+<li>The fixed palette is saved in <tt>.aps</tt> files.
+</ul>
+
+<h3>Brushes and foreign IFF files</h3>
+<ul>
+<li>Transparent areas are kept. With transparency, color 0 is reserved for transparent pixels
+(the usual DPaint brush); the export stores it as transparent color. For HAM, or when a palette has no free entry,
+a mask plane is written instead.
+<li>IFF brushes with a transparent color or a mask plane open with their transparency.
+<li>IFF pictures from other programs open with their palette and mode: 1 to 8 bitplanes, EHB, HAM6, HAM8, 24 bit,
+mask plane and DPaint PBM. Opened, edited and exported again, the palette stays the same.
+</ul>
+
+<!-- ======================================================= PART V -->
 <hr>
+<table width="100%" cellpadding="6" cellspacing="0" border="0"><tr><td bgcolor="#1e1e1e">
+<font size="+2"><b>Part V - Reference</b></font></td></tr></table>
+
 <a name="files"></a>
-<h2>15. File formats</h2>
+<h2>23. File formats</h2>
 <table border="1" cellpadding="4" cellspacing="0" bordercolor="#444444">
 <tr bgcolor="#1e1e1e"><th align="left">Format</th><th>Open</th><th>Save</th><th align="left">Notes</th></tr>
-<tr><td><tt>.aps</tt></td><td align="center">yes</td><td align="center">yes</td><td>Native format: keeps layers, groups, masks, styles, adjustment layers and editable text.</td></tr>
+<tr><td><tt>.aps</tt></td><td align="center">yes</td><td align="center">yes</td><td>Native format: layers, groups, masks, styles, adjustment layers, editable text, paths, palettes, AI prompts.</td></tr>
 <tr><td><tt>.psd</tt></td><td align="center">yes</td><td align="center">-</td><td>Layered files (RGB or grayscale, 8 bit, all compressions): layers, groups, masks, clipping masks, blend modes, opacity,
 adjustment layers (Levels, Hue/Saturation, Brightness/Contrast, Invert, Threshold, Posterize), drop shadow and outer glow.
 Text and smart objects come in as pixels. Files too large for the memory open flattened.</td></tr>
 <tr><td><tt>.png</tt></td><td align="center">yes</td><td align="center">yes</td><td>With transparency.</td></tr>
 <tr><td><tt>.jpg</tt></td><td align="center">yes</td><td align="center">yes</td><td>Flattened, quality 90.</td></tr>
-<tr><td><tt>.iff</tt></td><td align="center">yes</td><td align="center">yes</td><td>IFF ILBM and PBM, 1-8 bitplanes, EHB, HAM6/HAM8, 24 bit, brushes with transparency. Export with palette and screen mode, see <a href="#amiga">Amiga colors and IFF</a>.</td></tr>
+<tr><td><tt>.iff</tt></td><td align="center">yes</td><td align="center">yes</td><td>IFF ILBM and PBM, 1-8 bitplanes, EHB, HAM6/HAM8, 24 bit, brushes with transparency. See <a href="#amiga">Amiga colors and IFF</a>.</td></tr>
 <tr><td>other</td><td align="center">yes</td><td align="center">-</td><td>GIF, BMP and more via installed datatypes.</td></tr>
 </table>
 <p>From the Shell several pictures open at once: <tt>AmiPixelShop pic1.iff pic2.png pic3.psd</tt>.</p>
-<p>Copy and paste work with the Amiga clipboard (<tt>Ctrl+C</tt> / <tt>Ctrl+V</tt>), also <b>File &gt; New from Clipboard</b>.</p>
 
 <hr>
 <a name="keys"></a>
-<h2>16. Keyboard shortcuts</h2>
-<p>"Ctrl" also works with the Amiga keys.</p>
+<h2>24. Keyboard shortcuts</h2>
+<p>"Ctrl" also works with the Amiga keys. Tool keys: see the <a href="#tools">Tools</a> table.</p>
 <table border="1" cellpadding="3" cellspacing="0" bordercolor="#444444">
-<tr bgcolor="#1e1e1e"><th align="left">Keys</th><th align="left">Command</th><th align="left">Keys</th><th align="left">Command</th></tr>
-<tr><td>Ctrl+N</td><td>New</td><td>Ctrl+Z / Shift+Ctrl+Z</td><td>Undo / Redo</td></tr>
-<tr><td>Ctrl+O</td><td>Open</td><td>Alt+Ctrl+Z</td><td>Toggle last state</td></tr>
-<tr><td>Ctrl+S / Shift+Ctrl+S</td><td>Save / Save As</td><td>Ctrl+X / C / V</td><td>Cut / Copy / Paste</td></tr>
-<tr><td>Ctrl+W / Alt+Ctrl+W</td><td>Close / Close All</td><td>Shift+Ctrl+C</td><td>Copy Merged</td></tr>
-<tr><td>Ctrl+Q</td><td>Quit</td><td>Ctrl+T</td><td>Free Transform</td></tr>
-<tr><td>Ctrl+A / Ctrl+D</td><td>Select all / Deselect</td><td>Shift+F5</td><td>Fill...</td></tr>
-<tr><td>Shift+Ctrl+I</td><td>Inverse selection</td><td>Alt / Ctrl+Backspace</td><td>Fill foreground / background</td></tr>
-<tr><td>Shift+Ctrl+D</td><td>Reselect</td><td>Shift+F6</td><td>Feather</td></tr>
-<tr><td>Shift+Ctrl+N</td><td>New layer</td><td>Ctrl+L / M / U / I</td><td>Levels / Curves / Hue/Sat / Invert</td></tr>
-<tr><td>Ctrl+J / Shift+Ctrl+J</td><td>Layer via Copy / Cut</td><td>Shift+Ctrl+U</td><td>Desaturate</td></tr>
-<tr><td>Ctrl+G / Shift+Ctrl+G</td><td>Group / Ungroup</td><td>Ctrl+F</td><td>Last filter</td></tr>
-<tr><td>Ctrl+E / Shift+Ctrl+E</td><td>Merge down / visible</td><td>Alt+Ctrl+I / C</td><td>Image Size / Canvas Size</td></tr>
-<tr><td>Alt+Ctrl+G</td><td>Clipping mask</td><td>Ctrl++ / Ctrl+-</td><td>Zoom in / out</td></tr>
-<tr><td>Alt+Ctrl+A</td><td>Select all layers</td><td>Ctrl+0 / Ctrl+1</td><td>Fit / 100%</td></tr>
-<tr><td>Ctrl+[ / Ctrl+]</td><td>Layer down / up</td><td>Ctrl+Tab</td><td>Next document</td></tr>
-<tr><td>X / D</td><td>Swap / reset colors</td><td>, / .</td><td>Brush smaller / larger</td></tr>
-<tr><td>Space (hold)</td><td>Hand tool</td><td>F12</td><td>Revert</td></tr>
-<tr><td>Shift+Ctrl+X</td><td>Liquify</td><td>&nbsp;</td><td>&nbsp;</td></tr>
+<tr bgcolor="#1e1e1e"><th align="left" colspan="2">File and edit</th><th align="left" colspan="2">Selection and layers</th></tr>
+<tr><td>Ctrl+N / Ctrl+O</td><td>New / Open</td><td>Ctrl+A / Ctrl+D</td><td>Select all / Deselect</td></tr>
+<tr><td>Ctrl+S / Shift+Ctrl+S</td><td>Save / Save As</td><td>Shift+Ctrl+I</td><td>Inverse selection</td></tr>
+<tr><td>Ctrl+W / Alt+Ctrl+W</td><td>Close / Close All</td><td>Shift+Ctrl+D</td><td>Reselect</td></tr>
+<tr><td>Ctrl+Q</td><td>Quit</td><td>Shift+F6</td><td>Feather</td></tr>
+<tr><td>F12</td><td>Revert</td><td>Shift+Ctrl+N</td><td>New layer</td></tr>
+<tr><td>Ctrl+Z / Shift+Ctrl+Z</td><td>Undo / Redo</td><td>Ctrl+J / Shift+Ctrl+J</td><td>Layer via Copy / Cut</td></tr>
+<tr><td>Alt+Ctrl+Z</td><td>Toggle last state</td><td>Ctrl+G / Shift+Ctrl+G</td><td>Group / Ungroup</td></tr>
+<tr><td>Ctrl+X / C / V</td><td>Cut / Copy / Paste</td><td>Ctrl+E / Shift+Ctrl+E</td><td>Merge down / visible</td></tr>
+<tr><td>Shift+Ctrl+C</td><td>Copy Merged</td><td>Alt+Ctrl+G</td><td>Clipping mask</td></tr>
+<tr><td>Shift+F5</td><td>Fill...</td><td>Alt+Ctrl+A</td><td>Select all layers</td></tr>
+<tr><td>Alt / Ctrl+Backspace</td><td>Fill foreground / background</td><td>Ctrl+[ / Ctrl+]</td><td>Layer down / up</td></tr>
+<tr bgcolor="#1e1e1e"><th align="left" colspan="2">Image</th><th align="left" colspan="2">View and painting</th></tr>
+<tr><td>Ctrl+T</td><td>Free Transform</td><td>Ctrl++ / Ctrl+-</td><td>Zoom in / out</td></tr>
+<tr><td>Ctrl+L / M / U / I</td><td>Levels / Curves / Hue/Sat / Invert</td><td>Ctrl+0 / Ctrl+1</td><td>Fit / 100%</td></tr>
+<tr><td>Shift+Ctrl+U</td><td>Desaturate</td><td>Space (hold)</td><td>Hand tool</td></tr>
+<tr><td>Ctrl+F</td><td>Last filter</td><td>Ctrl+Tab</td><td>Next document</td></tr>
+<tr><td>Shift+Ctrl+X</td><td>Liquify</td><td>X / D</td><td>Swap / reset colors</td></tr>
+<tr><td>Alt+Ctrl+I / C</td><td>Image Size / Canvas Size</td><td>, / .</td><td>Brush smaller / larger</td></tr>
 </table>
-<p>Tool keys: see the <a href="#tools">Tools</a> table. Shift + key cycles through the tools of the same slot.</p>
+
+<hr>
+<a name="prefs"></a>
+<h2>25. Settings files</h2>
+<table border="1" cellpadding="4" cellspacing="0" bordercolor="#444444">
+<tr><td><tt>ENVARC:AmiPixelShop.prefs</tt></td><td>Screen mode, toolbar, New Document presets, task bar and AI settings.
+Delete it (and the copy in <tt>ENV:</tt>) to reset all settings.</td></tr>
+<tr><td><tt>ENVARC:AmiPixelShop/openrouter.key</tt></td><td>Your OpenRouter API key (set with <b>Edit &gt; AI API Key...</b>).</td></tr>
+</table>
 
 <hr>
 <a name="limits"></a>
-<h2>17. Known limitations (early beta)</h2>
+<h2>26. Known limitations</h2>
 <ul>
 <li>8 bit per channel RGB only; no CMYK, no 16 bit.
 <li>Up to 64 layers per document.
 <li>PSD files can be opened but not saved.
 <li>Very large images need a lot of memory (each layer is stored as 32 bit tiles; empty and plain white mask areas take no memory).
+<li>AI results are generated at about 1 megapixel and scaled to the selection - very large selections look softer.
+<li>Variants of generative layers are not saved, only the one shown.
 <li>No graphics tablet support.
 </ul>
 
 <hr>
 <a name="bugs"></a>
-<h2>18. Reporting bugs</h2>
+<h2>27. Reporting bugs</h2>
 <p>Testers are very welcome! Please report bugs and ideas on GitHub:</p>
 <p><b>https://github.com/radi7777/AmiPixelShop/issues</b></p>
 <p>Helpful: what you did, what happened, your setup (PiStorm model, OS version, screen mode, RAM)
@@ -336,7 +669,7 @@ and if possible a screenshot or the image.</p>
 
 <hr>
 <a name="credits"></a>
-<h2>19. License and credits</h2>
+<h2>28. License and credits</h2>
 <p>AmiPixelShop is released under the <b>MIT License</b> - see <tt>LICENSE</tt>.</p>
 <p>Created by a professional art designer, developed with the help of Claude (Anthropic).
 Written in C and 68k assembler. AmiPixelShop is an independent project and not affiliated with any other software vendor.</p>
@@ -344,7 +677,9 @@ Written in C and 68k assembler. AmiPixelShop is an independent project and not a
 <ul>
 <li>stb_image, stb_image_write, stb_truetype by Sean Barrett - Public Domain / MIT
 <li>zlib by Jean-loup Gailly and Mark Adler - zlib License
+<li>AmiSSL (OpenSSL for the Amiga) - used as an installed library
 <li>Interface font Open Sans - Apache License 2.0
+<li>AI image models via OpenRouter - your own account and key
 </ul>
 <p><a href="#top">Back to top</a></p>
 
