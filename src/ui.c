@@ -109,7 +109,8 @@ static const MenuItem m_layer[] = {
     { "Delete Layer", "", CMD_LAYER_DEL }, SEP,
     { "Rename Layer...", "", CMD_LAYER_RENAME }, SUB("Layer Style", m_lstyle), SEP,
     SUB("New Adjustment Layer", m_nadj), { "Layer Content Options...", "", CMD_ADJ_EDIT }, SEP,
-    SUB("Layer Mask", m_lmask), { "Rasterize Type", "", CMD_RASTERIZE }, SEP,
+    SUB("Layer Mask", m_lmask), { "Remove Background", "", CMD_REMOVE_BG },
+    { "Rasterize Type", "", CMD_RASTERIZE }, SEP,
     { "Create/Release Clipping Mask", "Alt+Ctrl+G", CMD_CLIP_TOGGLE }, SEP,
     { "Group Layers", "Ctrl+G", CMD_GROUP }, { "Ungroup Layers", "Shift+Ctrl+G", CMD_UNGROUP }, SEP,
     SUB("Arrange", m_arrange), SEP,
@@ -124,7 +125,7 @@ static const MenuItem m_select[] = {
     { "Reselect", "Shift+Ctrl+D", CMD_RESELECT },
     { "Inverse", "Shift+Ctrl+I", CMD_SEL_INVERT }, SEP,
     { "All Layers", "Alt+Ctrl+A", CMD_ALL_LAYERS }, { "Deselect Layers", "", CMD_DESEL_LAYERS }, SEP,
-    { "Color Range...", "", CMD_COLOR_RANGE }, SEP,
+    { "Color Range...", "", CMD_COLOR_RANGE }, { "Subject", "", CMD_SEL_SUBJECT }, SEP,
     SUB("Modify", m_modify), { "Grow", "", CMD_SEL_GROW_SIM }, { "Similar", "", CMD_SEL_SIMILAR }, END };
 static const MenuItem m_fblur[] = {
     { "Box Blur...", "", CMD_FLT_BOX }, { "Gaussian Blur...", "", CMD_FLT_GAUSS },

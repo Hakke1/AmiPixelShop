@@ -1756,6 +1756,12 @@ void do_command(LONG c)
     case CMD_GEN_REMOVE:
         ai_start(NULL);
         break;
+    case CMD_SEL_SUBJECT:
+        ai_segment(1);
+        break;
+    case CMD_REMOVE_BG:
+        ai_segment(2);
+        break;
     case CMD_PAL_FIX:
         if (!doc->qpal) {
             request("This image has no palette yet.\nUse Filter > Amiga > Reduce Colors first.", "OK");

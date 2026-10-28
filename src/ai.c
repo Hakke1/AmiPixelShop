@@ -45,10 +45,14 @@ typedef struct AiJob {
     LONG x, y, w, h;            /* Ausschnitt im Dokument */
     UBYTE *sel;                 /* Auswahl im Ausschnitt, w*h */
     BOOL grow;                  /* Entfernen: Maske um vom Modell geaenderte Raender erweitern */
+    LONG kind;                  /* AI_FILL, AI_SUBJECT, AI_RMBG */
+    Layer *layer;               /* AI_RMBG: Zielebene */
+    LONG ix0, iy0, iw, ih, sw, sh;  /* Segmentierung: Bild im gesendeten Rahmen (mit Graubalken) */
     char name[32];              /* Ebenenname */
     ULONG t0, t_up, t_first, t_done;    /* Start, Upload fertig, erstes Byte, Antwort da */
 } AiJob;
 
+enum { AI_FILL, AI_SUBJECT, AI_RMBG };
 static AiJob *job;              /* laufende Anfrage oder NULL */
 static LONG ai_sigbit = -1;
 static char ai_model[96];
@@ -720,6 +724,9 @@ static void place_result(AiJob *j)
 
 /* ---------- Start / Abbruch / Abfrage ---------- */
 
+static void bar_inval(void);
+BOOL ai_segment(LONG kind);
+
 BOOL ai_busy(void)
 {
     return job != NULL;
@@ -736,7 +743,52 @@ void ai_cancel(void)
         job->ctl.cancel = 1;
 }
 
-static void bar_inval(void);
+/* Auftrag anlegen: Schluessel lesen, Signal holen */
+static AiJob *job_new(void)
+{
+    AiJob *j;
+    char key[160];
+    if (job) {
+        status_message("An AI request is already running");
+        return NULL;
+    }
+    if (!(j = AllocVec(sizeof(AiJob), MEMF_ANY | MEMF_CLEAR)))
+        return NULL;
+    if (!read_key(key, sizeof(key))) {
+        FreeVec(j);
+        request("No OpenRouter API key found.\n\nPut your key into the file\n"
+                "ENVARC:AmiPixelShop/openrouter.key", "OK");
+        return NULL;
+    }
+    if (ai_sigbit < 0 && (ai_sigbit = AllocSignal(-1)) < 0) {
+        FreeVec(j);
+        return NULL;
+    }
+    sprintf(j->hdr, "Authorization: Bearer %s\r\nContent-Type: application/json\r\n"
+                    "X-Title: AmiPixelShop\r\n", key);
+    j->doc = doc;
+    j->parent = FindTask(NULL);
+    j->sig = ai_sigbit;
+    j->ctl.timeout = 180;
+    return j;
+}
+
+/* Hintergrundprozess starten; bei Fehler wird j freigegeben */
+static BOOL job_launch(AiJob *j)
+{
+    j->t0 = now_us();
+    job = j;
+    if (!CreateNewProcTags(NP_Entry, (ULONG)ai_worker, NP_Name, (ULONG)"AmiPixelShop AI",
+                           NP_StackSize, 65536, NP_Priority, -1, NP_Output, 0, NP_Input, 0,
+                           NP_CloseOutput, FALSE, NP_CloseInput, FALSE, TAG_DONE)) {
+        job = NULL;
+        job_free(j);
+        status_message("Cannot start the AI process");
+        return FALSE;
+    }
+    bar_inval();
+    return TRUE;
+}
 
 /* prompt NULL/leer: Inhalt entfernen bzw. leere Flaeche passend fortsetzen.
  * Der zu fuellende Bereich (Auswahl und Durchsichtiges) wird im gesendeten Bild
@@ -764,28 +816,13 @@ BOOL ai_start(const char *prompt)
     MemBuf jpg = { NULL, 0, 0 };
     char *e64 = NULL, *esc = NULL, *p;
     BOOL remove = !prompt || !prompt[0];
-    char key[160];
 
-    if (job) {
-        status_message("An AI request is already running");
-        return FALSE;
-    }
-    if (!doc->hassel) {
+    if (!doc->hassel && !job) {
         status_message("Make a selection first");
         return FALSE;
     }
-    if (!(j = AllocVec(sizeof(AiJob), MEMF_ANY | MEMF_CLEAR)))
+    if (!(j = job_new()))
         return FALSE;
-    if (!read_key(key, sizeof(key))) {
-        FreeVec(j);
-        request("No OpenRouter API key found.\n\nPut your key into the file\n"
-                "ENVARC:AmiPixelShop/openrouter.key", "OK");
-        return FALSE;
-    }
-    if (ai_sigbit < 0 && (ai_sigbit = AllocSignal(-1)) < 0) {
-        FreeVec(j);
-        return FALSE;
-    }
 
     doc_process_dirty();
     ri = crop_box(&bx, &by, &bw, &bh);
@@ -794,16 +831,11 @@ BOOL ai_start(const char *prompt)
     sw = (bw * x + lng / 2) / lng;
     sh = (bh * x + lng / 2) / lng;
 
-    sprintf(j->hdr, "Authorization: Bearer %s\r\nContent-Type: application/json\r\n"
-                    "X-Title: AmiPixelShop\r\n", key);
-    j->doc = doc;
+    j->kind = AI_FILL;
     j->x = bx;
     j->y = by;
     j->w = bw;
     j->h = bh;
-    j->parent = FindTask(NULL);
-    j->sig = ai_sigbit;
-    j->ctl.timeout = 180;
 
     /* Auswahl im Ausschnitt merken (darf sich waehrenddessen aendern) */
     if (!(j->sel = malloc(bw * bh)) || !(rgb = malloc(sw * sh * 3)))
@@ -880,19 +912,7 @@ BOOL ai_start(const char *prompt)
     j->blen = p - j->body;
     net_freemem(e64);
     free(esc);
-
-    j->t0 = now_us();
-    job = j;
-    if (!CreateNewProcTags(NP_Entry, (ULONG)ai_worker, NP_Name, (ULONG)"AmiPixelShop AI",
-                           NP_StackSize, 65536, NP_Priority, -1, NP_Output, 0, NP_Input, 0,
-                           NP_CloseOutput, FALSE, NP_CloseInput, FALSE, TAG_DONE)) {
-        job = NULL;
-        job_free(j);
-        status_message("Cannot start the AI process");
-        return FALSE;
-    }
-    bar_inval();
-    return TRUE;
+    return job_launch(j);
 
 fail:
     free(rgb);
@@ -953,6 +973,302 @@ BOOL ai_start_mask(UBYTE *m)
     return ok;
 }
 
+/* ---------- Motiv: Auswahl bzw. Hintergrund entfernen ---------- */
+
+/* Kastenmittel (Radius r) von src nach dst; tmp: w*h LONG */
+static void box_mean(LONG *src, LONG *dst, LONG w, LONG h, LONG r, LONG *tmp)
+{
+    LONG x, y;
+    for (y = 0; y < h; y++) {           /* waagerecht: Summen */
+        LONG *s = src + y * w;
+        LONG *t = tmp + y * w, sum = 0;
+        for (x = 0; x < r && x < w; x++)
+            sum += s[x];
+        for (x = 0; x < w; x++) {
+            if (x + r < w) sum += s[x + r];
+            if (x - r - 1 >= 0) sum -= s[x - r - 1];
+            t[x] = sum;
+        }
+    }
+    for (x = 0; x < w; x++) {           /* senkrecht, durch Anzahl teilen */
+        LONG sum = 0, cx = (x + r < w ? x + r : w - 1) - (x - r > 0 ? x - r : 0) + 1;
+        for (y = 0; y < r && y < h; y++)
+            sum += tmp[y * w + x];
+        for (y = 0; y < h; y++) {
+            LONG cy;
+            if (y + r < h) sum += tmp[(y + r) * w + x];
+            if (y - r - 1 >= 0) sum -= tmp[(y - r - 1) * w + x];
+            cy = (y + r < h ? y + r : h - 1) - (y - r > 0 ? y - r : 0) + 1;
+            dst[y * w + x] = sum / (cx * cy);
+        }
+    }
+}
+
+/* Kante der hochskalierten Maske an die Bildkanten anpassen (Guided Filter,
+ * He et al.; Fuehrung = Helligkeit des Komposits). Ganzzahlig. */
+static void refine_mask(UBYTE *m, LONG w, LONG h)
+{
+    LONG n = w * h, i, r = w / 320 + 3, eps = 400;
+    LONG *I = NULL, *P = NULL, *a = NULL, *b = NULL, *t = NULL;
+    if (n > 12000000)
+        return;
+    I = malloc(n * 4);
+    P = malloc(n * 4);
+    a = malloc(n * 4);
+    b = malloc(n * 4);
+    t = malloc(n * 4);
+    if (!I || !P || !a || !b || !t)
+        goto out;
+    for (i = 0; i < n; i++) {
+        ULONG q = doc->flat[i];
+        LONG l = (((q >> 16) & 0xFF) * 77 + ((q >> 8) & 0xFF) * 151 + (q & 0xFF) * 28) >> 8;
+        I[i] = l + ((255 - (q >> 24)) >> 1);        /* Durchsichtiges: grau */
+        if (I[i] > 255) I[i] = 255;
+    }
+    for (i = 0; i < n; i++) {
+        a[i] = I[i] * I[i];
+        P[i] = I[i] * m[i];
+    }
+    box_mean(a, a, w, h, r, t);         /* mean(I*I) */
+    box_mean(P, P, w, h, r, t);         /* mean(I*p) */
+    for (i = 0; i < n; i++)
+        b[i] = m[i];
+    box_mean(b, b, w, h, r, t);         /* mean(p) */
+    for (i = 0; i < n; i++)             /* Kantenband merken: mean(p) weder 0 noch 255 */
+        if (b[i] < 4 || b[i] > 251)
+            m[i] = m[i] >= 128 ? 255 : 0;
+        else
+            m[i] = m[i] >= 128 ? 254 : 1;
+    box_mean(I, I, w, h, r, t);         /* mean(I); I selbst wird unten neu berechnet */
+    for (i = 0; i < n; i++) {
+        LONG mi = I[i], var = a[i] - mi * mi, cov = P[i] - mi * b[i], av;
+        if (var < 0) var = 0;
+        av = (cov * 256) / (var + eps);             /* a * 256 */
+        if (av > 4096) av = 4096;                   /* gegen Ueberlauf in box_mean */
+        if (av < -4096) av = -4096;
+        a[i] = av;
+        b[i] = b[i] * 256 - av * mi;                /* b * 256 */
+    }
+    box_mean(a, a, w, h, r, t);
+    box_mean(b, b, w, h, r, t);
+    for (i = 0; i < n; i++) {
+        ULONG q = doc->flat[i];
+        LONG l = (((q >> 16) & 0xFF) * 77 + ((q >> 8) & 0xFF) * 151 + (q & 0xFF) * 28) >> 8, v;
+        l += (255 - (q >> 24)) >> 1;
+        if (l > 255) l = 255;
+        if (m[i] == 0 || m[i] == 255)  /* ausserhalb des Kantenbands: Maske des Modells */
+            continue;
+        v = (a[i] * l + b[i] + 128) >> 8;
+        v = (v - 128) * 3 / 2 + 128;    /* etwas haerter: weniger Schleier */
+        m[i] = v < 0 ? 0 : v > 255 ? 255 : v;
+    }
+out:
+    free(I);
+    free(P);
+    free(a);
+    free(b);
+    free(t);
+}
+
+static void place_segment(AiJob *j)
+{
+    UBYTE *rgb, *m;
+    int iw, ih, n;
+    LONG x, y, *xs;
+    ULONG t;
+    char msg[120];
+
+    doc_process_dirty();
+    if (!(rgb = stbi_load_from_memory(j->img, j->imglen, &iw, &ih, &n, 3))) {
+        status_message("AI: cannot read the returned image");
+        return;
+    }
+    if (!(m = malloc(doc->w * doc->h)) || !(xs = malloc(doc->w * sizeof(LONG)))) {
+        free(m);
+        stbi_image_free(rgb);
+        status_message("Not enough memory");
+        return;
+    }
+    /* Dokument -> gesendeter Rahmen (sw x sh, Bild bei ix0/iy0) -> Antwortbild; bilinear */
+    for (x = 0; x < doc->w; x++) {
+        LONG f = (LONG)((((x + 0.5f) * j->iw / doc->w + j->ix0) * iw / j->sw - 0.5f) * 65536.0f);
+        xs[x] = f < 0 ? 0 : f > (iw - 1) << 16 ? (iw - 1) << 16 : f;
+    }
+    for (y = 0; y < doc->h; y++) {
+        LONG f = (LONG)((((y + 0.5f) * j->ih / doc->h + j->iy0) * ih / j->sh - 0.5f) * 65536.0f);
+        LONG cy = f < 0 ? 0 : f > (ih - 1) << 16 ? (ih - 1) << 16 : f, y0 = cy >> 16, wy = (cy >> 8) & 255;
+        const UBYTE *r0 = rgb + y0 * iw * 3, *r1 = y0 + 1 < ih ? r0 + iw * 3 : r0;
+        UBYTE *d = m + y * doc->w;
+        for (x = 0; x < doc->w; x++) {
+            LONG x0 = xs[x] >> 16, wx = (xs[x] >> 8) & 255, x1 = x0 + 1 < iw ? x0 + 1 : x0;
+            LONG top = (r0[x0 * 3] + r0[x0 * 3 + 1] + r0[x0 * 3 + 2]) * (256 - wx) +
+                       (r0[x1 * 3] + r0[x1 * 3 + 1] + r0[x1 * 3 + 2]) * wx;
+            LONG bot = (r1[x0 * 3] + r1[x0 * 3 + 1] + r1[x0 * 3 + 2]) * (256 - wx) +
+                       (r1[x1 * 3] + r1[x1 * 3 + 1] + r1[x1 * 3 + 2]) * wx;
+            d[x] = (top * (256 - wy) + bot * wy) / (3 << 16);
+        }
+    }
+    free(xs);
+    stbi_image_free(rgb);
+    t = now_us();
+    refine_mask(m, doc->w, doc->h);
+    t = now_us() - t;
+
+    if (j->kind == AI_SUBJECT) {
+        CopyMem(m, doc->sel, doc->w * doc->h);
+        sel_update_bounds();
+        view_ants_rebuild();
+        view_inval_all();
+    } else {
+        /* Ebene noch da? */
+        Layer *l = NULL;
+        LONG i, k, ntiles = doc->tw * doc->th;
+        Tile **mt;
+        UndoRec *u;
+        for (i = 0; i < doc->nlayers; i++)
+            if (doc->layers[i] == j->layer)
+                l = j->layer;
+        if (!l || l->mask || !(mt = AllocVec(ntiles * sizeof(Tile *), MEMF_ANY | MEMF_CLEAR))) {
+            free(m);
+            status_message(!l ? "Remove Background: the layer is gone" :
+                           l->mask ? "Remove Background: the layer already has a mask" : "Not enough memory");
+            return;
+        }
+        for (i = 0; i < ntiles; i++) {
+            LONG x0 = (i % doc->tw) << TILE_SHIFT, y0 = (i / doc->tw) << TILE_SHIFT;
+            if (!(mt[i] = tile_new_gray(0)))
+                continue;
+            for (y = 0; y < TILE_SIZE && y0 + y < doc->h; y++)
+                for (k = 0; k < TILE_SIZE && x0 + k < doc->w; k++)
+                    mt[i]->px[(y << TILE_SHIFT) | k] = 0xFF000000 | (m[(y0 + y) * doc->w + x0 + k] * 0x010101);
+        }
+        u = undo_begin_struct("Remove Background");
+        if (l->movf) {
+            FreeVec(l->movf);
+            l->movf = NULL;
+        }
+        l->mask = mt;
+        l->mask_on = 1;
+        mask_compact(doc, l);
+        doc->edit_mask = FALSE;
+        doc->modified = TRUE;
+        doc_mark_all_dirty();
+        undo_commit(u);
+        ui_draw_panels();
+        view_inval_all();
+    }
+    free(m);
+    sprintf(msg, "%s: %ld.%ld s (server %ld.%ld, edges %ld.%ld)", j->kind == AI_SUBJECT ? "Select Subject" : "Remove Background",
+            (long)((now_us() - j->t0) / 1000000), (long)((now_us() - j->t0) / 100000 % 10),
+            (long)((j->t_done - j->t0) / 1000000), (long)((j->t_done - j->t0) / 100000 % 10),
+            (long)(t / 1000000), (long)(t / 100000 % 10));
+    status_message(msg);
+}
+
+/* Select > Subject (AI_SUBJECT) bzw. Layer > Remove Background (AI_RMBG):
+ * das Modell liefert eine Schwarz-Weiss-Maske des Hauptmotivs */
+BOOL ai_segment(LONG kind)
+{
+    static const char task[] =
+        "Segmentation task. Output a black-and-white mask of this photo with exactly the same size and "
+        "framing: the main subject (including fine details like hair and fur) pure white, everything else "
+        "pure black. Flat gray bars at the edges are padding and belong to the black background. No other "
+        "content, no gray except at soft edges.";
+    AiJob *j;
+    Layer *l = doc->layers[doc->active];
+    LONG ri = 0, i, pw, ph, lng, sw, sh, y, l64, best;
+    float a = (float)doc->w / doc->h, bd = 1e9f;
+    UBYTE *rgb = NULL, *in = NULL;
+    MemBuf jpg = { NULL, 0, 0 };
+    char *e64 = NULL, *p;
+
+    if (kind == AI_RMBG && (l->kind != LK_PIXEL || l->text)) {
+        status_message("Remove Background works on pixel layers");
+        return FALSE;
+    }
+    if (kind == AI_RMBG && l->mask) {
+        status_message("The layer already has a mask - delete it first");
+        return FALSE;
+    }
+    if (!(j = job_new()))
+        return FALSE;
+    j->kind = kind;
+    j->layer = l;
+    j->x = 0;
+    j->y = 0;
+    j->w = doc->w;
+    j->h = doc->h;
+    doc_process_dirty();
+
+    /* naechstes Seitenverhaeltnis; das Bild wird mit Graubalken darauf erweitert */
+    for (i = 0; i < (LONG)(sizeof(ratios) / 2); i++) {
+        float r = (float)ratios[i][0] / ratios[i][1], d = r > a ? r / a : a / r;
+        if (d < bd) {
+            bd = d;
+            ri = i;
+        }
+    }
+    {
+        float r = (float)ratios[ri][0] / ratios[ri][1];
+        pw = r > a ? (LONG)(doc->h * r + 0.5f) : doc->w;
+        ph = r > a ? doc->h : (LONG)(doc->w / r + 0.5f);
+    }
+    lng = pw > ph ? pw : ph;
+    best = lng > AI_MAXSIDE ? AI_MAXSIDE : lng;
+    sw = (pw * best + lng / 2) / lng;
+    sh = (ph * best + lng / 2) / lng;
+    j->sw = sw;
+    j->sh = sh;
+    j->iw = (doc->w * best + lng / 2) / lng;
+    j->ih = (doc->h * best + lng / 2) / lng;
+    if (j->iw > sw) j->iw = sw;
+    if (j->ih > sh) j->ih = sh;
+    j->ix0 = (sw - j->iw) / 2;
+    j->iy0 = (sh - j->ih) / 2;
+
+    if (!(rgb = malloc(sw * sh * 3)) || !(in = malloc(j->iw * j->ih * 3)))
+        goto fail;
+    memset(rgb, 128, sw * sh * 3);
+    sample_rgb(in, j->iw, j->ih, 0, 0, doc->w, doc->h);
+    for (y = 0; y < j->ih; y++)
+        memcpy(rgb + ((j->iy0 + y) * sw + j->ix0) * 3, in + y * j->iw * 3, j->iw * 3);
+    free(in);
+    in = NULL;
+    if (!stbi_write_jpg_to_func(mem_write, &jpg, sw, sh, 3, rgb, 92) || !jpg.p)
+        goto fail;
+    free(rgb);
+    rgb = NULL;
+    if (!(e64 = b64_encode(jpg.p, jpg.n, &l64)))
+        goto fail;
+    free(jpg.p);
+    jpg.p = NULL;
+    if (!(j->body = net_alloc(l64 + sizeof(task) + 1024)))
+        goto fail;
+    p = j->body;
+    sprintf(p, "{\"model\":\"%s\",\"modalities\":[\"image\",\"text\"],"
+               "\"image_config\":{\"aspect_ratio\":\"%ld:%ld\"},\"usage\":{\"include\":true},"
+               "\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"%s\"},"
+               "{\"type\":\"image_url\",\"image_url\":{\"url\":\"data:image/jpeg;base64,",
+            model_name(FALSE), (long)ratios[ri][0], (long)ratios[ri][1], task);
+    p += strlen(p);
+    memcpy(p, e64, l64);
+    p += l64;
+    strcpy(p, "\"}}]}]}");
+    p += strlen(p);
+    j->blen = p - j->body;
+    net_freemem(e64);
+    return job_launch(j);
+
+fail:
+    free(rgb);
+    free(in);
+    free(jpg.p);
+    net_freemem(e64);
+    job_free(j);
+    status_message("Not enough memory");
+    return FALSE;
+}
+
 /* nach einem Signal oder zyklisch: fertige Anfrage auswerten */
 void ai_poll(void)
 {
@@ -968,18 +1284,22 @@ void ai_poll(void)
         if (doc_alive(j->doc)) {
             if (j->doc != doc)
                 main_activate_doc(j->doc);
-            place_result(j);
+            if (j->kind == AI_FILL)
+                place_result(j);
+            else
+                place_segment(j);
         }
     } else if (!j->ctl.cancel) {
         char msg[200];
-        sprintf(msg, "Generative Fill failed:\n\n%s", j->err);
+        sprintf(msg, "%s failed:\n\n%s", j->kind == AI_SUBJECT ? "Select Subject" :
+                j->kind == AI_RMBG ? "Remove Background" : "Generative Fill", j->err);
         job = NULL;
         bar_inval();
         job_free(j);
         request(msg, "OK");
         return;
     } else {
-        status_message("Generative Fill cancelled");
+        status_message("AI request cancelled");
     }
     job = NULL;
     bar_inval();
@@ -1005,6 +1325,7 @@ void ai_shutdown(void)
 /* ---------- schwebende Taskleiste unter der Auswahl ---------- */
 
 enum { BAR_IDLE, BAR_PROMPT };
+#define BAR_NOSEL (!job && !doc->hassel)        /* Leiste ohne Auswahl: Select Subject / Remove Background */
 static LONG bar_mode = BAR_IDLE;
 static char bar_prompt[200];
 static LONG bar_x, bar_y, bar_w, bar_h;         /* zuletzt gezeichnet, w = 0: keine */
@@ -1016,17 +1337,24 @@ static BOOL bar_visible(void)
 {
     if (job)
         return TRUE;
-    return doc && doc->hassel && !transform_active() && !text_active() && !liquify_active() &&
-           !crop_active() && !ui_menu_open();
+    if (!doc || transform_active() || text_active() || liquify_active() || crop_active() || ui_menu_open())
+        return FALSE;
+    /* ohne Auswahl nur bei Auswahl-/Verschiebe-Werkzeugen, wie die Taskleiste in Photoshop */
+    return doc->hassel || (tool <= T_WAND && !ui_dragging());
 }
 
 static void bar_rect(LONG *x, LONG *y, LONG *w, LONG *h)
 {
     static LONG lx, ly;
-    LONG ww = job ? 250 : bar_mode == BAR_PROMPT ? 480 : 252;
+    LONG ww = job ? 250 : BAR_NOSEL ? 300 : bar_mode == BAR_PROMPT ? 480 : 252;
     *w = ww;
     *h = BAR_H;
-    if (doc && (doc->hassel || (job && job->doc == doc))) {
+    if (doc && BAR_NOSEL) {                     /* unter dem Bild */
+        lx = (doc2scrx(0) + doc2scrx(doc->w)) / 2 - ww / 2;
+        ly = doc2scry(doc->h) + 14;
+        if (ly + BAR_H > cvy + cvh - 8)
+            ly = cvy + cvh - BAR_H - 8;
+    } else if (doc && (doc->hassel || (job && job->doc == doc))) {
         BOOL s = doc->hassel;
         LONG sx0 = doc2scrx(s ? doc->selx0 : job->x), sx1 = doc2scrx(s ? doc->selx1 : job->x + job->w);
         LONG sy0 = doc2scry(s ? doc->sely0 : job->y), sy1 = doc2scry(s ? doc->sely1 : job->y + job->h);
@@ -1068,10 +1396,11 @@ void ai_overlay(void)
     if (job) {
         char s[48];
         LONG secs = (now_us() - job->t0) / 1000000;
+        const char *what = job->kind == AI_FILL ? "Generating..." : "Finding subject...";
         if (job->ctl.recvd > 0)
-            sprintf(s, "Generating... %ld s  %ld KB", (long)secs, (long)(job->ctl.recvd >> 10));
+            sprintf(s, "%s %ld s  %ld KB", what, (long)secs, (long)(job->ctl.recvd >> 10));
         else
-            sprintf(s, "Generating... %ld s", (long)secs);
+            sprintf(s, "%s %ld s", what, (long)secs);
         text(x + 10, y + 8, s, COL_TEXT);
         bar_button(x + w - 78, y + 5, 70, "Cancel", FALSE);
     } else if (bar_mode == BAR_PROMPT) {
@@ -1086,6 +1415,9 @@ void ai_overlay(void)
         gfx_noclip();
         bar_button(fx + fw + 8, y + 5, 96, "Generate", TRUE);
         bar_button(x + w - 36, y + 5, 28, "x", FALSE);
+    } else if (BAR_NOSEL) {
+        bar_button(x + 8, y + 5, 132, "Select Subject", FALSE);
+        bar_button(x + 148, y + 5, 144, "Remove Background", FALSE);
     } else {
         bar_button(x + 8, y + 5, 140, "Generative Fill", TRUE);
         bar_button(x + 156, y + 5, 88, "Remove", FALSE);
@@ -1185,6 +1517,11 @@ BOOL ai_bar_click(LONG mx, LONG my)
     if (job) {
         if (mx >= x + w - 78)
             ai_cancel();
+    } else if (BAR_NOSEL) {
+        if (mx >= x + 8 && mx < x + 140)
+            ai_segment(AI_SUBJECT);
+        else if (mx >= x + 148 && mx < x + 292)
+            ai_segment(AI_RMBG);
     } else if (bar_mode == BAR_PROMPT) {
         LONG fx = FIELD_X(x), fw = FIELD_W(w);
         if (mx >= fx && mx < fx + fw)
