@@ -152,7 +152,8 @@ static const MenuItem m_view[] = {
     { "Zoom In", "Ctrl++", CMD_ZOOM_IN }, { "Zoom Out", "Ctrl+-", CMD_ZOOM_OUT }, SEP,
     { "Fit on Screen", "Ctrl+0", CMD_ZOOM_FIT }, { "100%", "Ctrl+1", CMD_ZOOM_100 }, END };
 static const MenuItem m_window[] = {
-    { "Next Document", "Ctrl+Tab", CMD_NEXT_DOC }, END };
+    { "Next Document", "Ctrl+Tab", CMD_NEXT_DOC }, SEP,
+    { "Contextual Task Bar", "", CMD_TASKBAR }, END };
 static const MenuItem m_help[] = {
     { "About AmiPixelShop...", "", CMD_ABOUT }, END };
 static const MenuItem m_taa[] = {
@@ -1404,6 +1405,7 @@ void ui_prefs_load(void)
     np_load(buf);
     move_autosel = strstr(buf, "autosel=1") != NULL;
     move_autogroup = strstr(buf, "autogroup=1") != NULL;
+    ai_taskbar = strstr(buf, "taskbar=0") == NULL;
     for (i = 0; i < T_COUNT && !tool_visible[i]; i++)
         ;
     if (i == T_COUNT)
@@ -1425,7 +1427,8 @@ void ui_prefs_save(void)
     strcat(buf, "\n");
     if (pref_mode != 0xFFFFFFFF)
         sprintf(buf + strlen(buf), "mode=0x%08lx\n", (unsigned long)pref_mode);
-    sprintf(buf + strlen(buf), "autosel=%ld\nautogroup=%ld\n", (long)move_autosel, (long)move_autogroup);
+    sprintf(buf + strlen(buf), "autosel=%ld\nautogroup=%ld\ntaskbar=%ld\n", (long)move_autosel,
+            (long)move_autogroup, (long)ai_taskbar);
     if (np_nrecent)
         np_write(buf, "recent=", np_recent, np_nrecent);
     if (np_nsaved)
@@ -2750,6 +2753,10 @@ static void drop_draw(Drop *d)
             if (i == d->hover && en)
                 fill(d->x + 1, y, d->w - 2, 22, COL_ACCENT);
             text(d->x + 22, y + 2, it->label, c);
+            if (it->cmd == CMD_TASKBAR && ai_taskbar) {     /* Haekchen */
+                line(d->x + 7, y + 11, d->x + 10, y + 14, c);
+                line(d->x + 10, y + 14, d->x + 15, y + 6, c);
+            }
             if (it->sub) {          /* Pfeil nach rechts */
                 LONG ax = d->x + d->w - 16, ay = y + 7, k;
                 for (k = 0; k < 4; k++)

@@ -1333,38 +1333,41 @@ static LONG bar_secs = -1;
 static LONG bar_sel[4];                         /* Auswahl, fuer die die Leiste offen ist */
 #define BAR_H 34
 
+BOOL ai_taskbar = TRUE;         /* Window > Contextual Task Bar */
+
 static BOOL bar_visible(void)
 {
     if (job)
         return TRUE;
     if (!doc || transform_active() || text_active() || liquify_active() || crop_active() || ui_menu_open())
         return FALSE;
+    if (!ai_taskbar)            /* ausgeblendet: nur das ueber das Menue geoeffnete Eingabefeld */
+        return bar_mode == BAR_PROMPT && doc->hassel;
     /* ohne Auswahl nur bei Auswahl-/Verschiebe-Werkzeugen, wie die Taskleiste in Photoshop */
     return doc->hassel || (tool <= T_WAND && !ui_dragging());
 }
 
 static void bar_rect(LONG *x, LONG *y, LONG *w, LONG *h)
 {
-    static LONG lx, ly;
-    LONG ww = job ? 250 : BAR_NOSEL ? 300 : bar_mode == BAR_PROMPT ? 480 : 252;
+    LONG ww = job ? 250 : BAR_NOSEL ? 300 : bar_mode == BAR_PROMPT ? 480 : 252, lx, ly;
+    LONG it = doc2scry(0), ib = doc2scry(doc->h), cx;
     *w = ww;
     *h = BAR_H;
-    if (doc && BAR_NOSEL) {                     /* unter dem Bild */
-        lx = (doc2scrx(0) + doc2scrx(doc->w)) / 2 - ww / 2;
-        ly = doc2scry(doc->h) + 14;
-        if (ly + BAR_H > cvy + cvh - 8)
-            ly = cvy + cvh - BAR_H - 8;
-    } else if (doc && (doc->hassel || (job && job->doc == doc))) {
-        BOOL s = doc->hassel;
-        LONG sx0 = doc2scrx(s ? doc->selx0 : job->x), sx1 = doc2scrx(s ? doc->selx1 : job->x + job->w);
-        LONG sy0 = doc2scry(s ? doc->sely0 : job->y), sy1 = doc2scry(s ? doc->sely1 : job->y + job->h);
-        lx = (sx0 + sx1) / 2 - ww / 2;
-        ly = sy1 + 14;
-        if (ly + BAR_H > cvy + cvh - 8)
-            ly = sy0 - 14 - BAR_H;
-        if (ly < cvy + 8)
-            ly = cvy + cvh - BAR_H - 8;
-    }
+    /* waagerecht unter der Auswahl (bzw. Bildmitte), senkrecht ausserhalb des Bildes:
+     * darunter, sonst darueber, sonst am unteren Rand der Arbeitsflaeche */
+    if (doc->hassel)
+        cx = (doc2scrx(doc->selx0) + doc2scrx(doc->selx1)) / 2;
+    else if (job && job->doc == doc && job->kind == AI_FILL)
+        cx = doc2scrx(job->x + job->w / 2);
+    else
+        cx = (doc2scrx(0) + doc2scrx(doc->w)) / 2;
+    lx = cx - ww / 2;
+    if (ib + 10 + BAR_H <= cvy + cvh - 6)
+        ly = ib + 10;
+    else if (it - 10 - BAR_H >= cvy + 6)
+        ly = it - 10 - BAR_H;
+    else
+        ly = cvy + cvh - BAR_H - 8;
     if (lx + ww > cvx + cvw - 8)
         lx = cvx + cvw - ww - 8;
     if (lx < cvx + 8)
@@ -1439,6 +1442,11 @@ static void bar_inval(void)
     } else {
         bar_w = 0;
     }
+}
+
+void ai_bar_refresh(void)
+{
+    bar_inval();
 }
 
 /* zyklisch (INTUITICKS): Lage/Zeit nachfuehren, Ergebnis abholen */

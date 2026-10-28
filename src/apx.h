@@ -660,7 +660,7 @@ enum {
     CMD_PATH_SEL, CMD_PATH_FILL, CMD_PATH_STROKE, CMD_PATH_DEL,
     CMD_TF_FREE, CMD_TF_DISTORT, CMD_TF_PERSP, CMD_TF_WARP,
     CMD_FLT_LIQUIFY, CMD_LQ_APPLY, CMD_LQ_CANCEL, CMD_EXPORT_IFF,
-    CMD_PAL_LOAD, CMD_PAL_SAVE, CMD_PAL_FIX, CMD_GEN_FILL, CMD_GEN_REMOVE, CMD_SEL_SUBJECT, CMD_REMOVE_BG,
+    CMD_PAL_LOAD, CMD_PAL_SAVE, CMD_PAL_FIX, CMD_GEN_FILL, CMD_GEN_REMOVE, CMD_SEL_SUBJECT, CMD_REMOVE_BG, CMD_TASKBAR,
     CMD_GROUP_NEW, CMD_GROUP, CMD_UNGROUP, CMD_MERGE_GROUP, CMD_ADJ_EDIT,
     CMD_NADJ_BRICON, CMD_NADJ_LEVELS, CMD_NADJ_CURVES, CMD_NADJ_HUESAT, CMD_NADJ_DESAT,
     CMD_NADJ_INVERT, CMD_NADJ_THRESH, CMD_NADJ_POSTER, CMD_FLIP_H, CMD_FLIP_V, CMD_ROT180, CMD_ROT90CW, CMD_ROT90CCW,
@@ -693,6 +693,8 @@ LONG request(const char *body, const char *gadgets);
 BOOL ai_start(const char *prompt);  /* NULL: Inhalt der Auswahl entfernen */
 BOOL ai_start_mask(UBYTE *m);       /* Entfernen mit eigener Maske (w*h, wird veraendert) */
 BOOL ai_segment(LONG kind);         /* 1: Select Subject, 2: Remove Background */
+extern BOOL ai_taskbar;             /* schwebende KI-Leiste anzeigen */
+void ai_bar_refresh(void);
 void ai_open_prompt(void);
 void ai_cancel(void);
 BOOL ai_busy(void);

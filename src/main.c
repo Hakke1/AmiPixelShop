@@ -1759,6 +1759,12 @@ void do_command(LONG c)
     case CMD_SEL_SUBJECT:
         ai_segment(1);
         break;
+    case CMD_TASKBAR:
+        ai_taskbar = !ai_taskbar;
+        ui_prefs_save();
+        ai_bar_refresh();
+        view_inval_all();
+        break;
     case CMD_REMOVE_BG:
         ai_segment(2);
         break;
