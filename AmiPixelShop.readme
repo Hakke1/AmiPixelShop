@@ -3,12 +3,12 @@ Kurz:         Ebenen-Bildbearbeitung, RTG/PiStorm
 Author:       radi777
 Uploader:     thomas.radeck gmail com (radi777, see note below)
 Type:         gfx/edit
-Version:      0.4
+Version:      0.5
 Architecture: m68k-amigaos >= 3.2.0
 Requires:     PiStorm (Emu68) or 68060+FPU, RTG 24/32 bit, 128 MB RAM
 Distribution: Aminet
 
-AmiPixelShop 0.4 - Early Beta
+AmiPixelShop 0.5 - Early Beta
 =============================
 
 A modern, layer-based image editor written natively for the Amiga.
@@ -25,6 +25,9 @@ on GitHub (Issues). Read Guide.html in the archive for instructions
 
 Features
 --------
+- AI: Generative Fill with a text prompt, Remove (button or brush),
+  Extend (outpainting), Select Subject, Remove Background - directly
+  from the Amiga via OpenRouter (needs AmiSSL v5 and an API key)
 - Layers (up to 64), 25 blend modes, opacity/fill, locks, groups
 - Layer masks, group masks, clipping masks, adjustment layers
 - Layer styles: drop shadow, outer glow, stroke
@@ -48,6 +51,7 @@ Requirements
 - maybe a real 68060 with FPU and RTG (untested)
 - AmigaOS 3.2, Picasso96/P96 with a 24 or 32 bit screen mode
 - 128 MB Fast RAM or more
+- for the AI features: Roadshow, AmiSSL v5, OpenRouter API key
 
 Tested on an Amiga 500 with PiStorm (Pi 3A+, Emu68) and AmigaOS 3.2.3.
 

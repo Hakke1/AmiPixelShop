@@ -31,9 +31,9 @@
 #include "net.h"
 #include "quant.h"
 
-#define APS_VERSION "0.4"
+#define APS_VERSION "0.5"
 /* fuer "Version AmiPixelShop" in der Shell */
-static const char verstag[] __attribute__((used)) = "$VER: AmiPixelShop " APS_VERSION " (27.10.2026) Early Beta";
+static const char verstag[] __attribute__((used)) = "$VER: AmiPixelShop " APS_VERSION " (28.10.2026) Early Beta";
 
 struct IntuitionBase *IntuitionBase;
 struct GfxBase *GfxBase;
