@@ -320,6 +320,8 @@ static void mouse_down(UWORD qual, ULONG secs, ULONG mics)
     }
     if (!in_canvas(mouse_x, mouse_y))
         return;
+    if (ai_bar_click(mouse_x, mouse_y))
+        return;
 
     if (liquify_active() && !space_down) {
         liquify_mouse_down(dx, dy);
@@ -1044,7 +1046,7 @@ static void busy(BOOL on)
 }
 
 /* Texte fuer System-Requester sind Latin-1 */
-static LONG request(const char *body, const char *gadgets)
+LONG request(const char *body, const char *gadgets)
 {
     struct EasyStruct es;
     LONG r;
@@ -1748,6 +1750,12 @@ void do_command(LONG c)
         } else
             status_message("Palette saved");
         break; }
+    case CMD_GEN_FILL:
+        ai_open_prompt();
+        break;
+    case CMD_GEN_REMOVE:
+        ai_start(NULL);
+        break;
     case CMD_PAL_FIX:
         if (!doc->qpal) {
             request("This image has no palette yet.\nUse Filter > Amiga > Reduce Colors first.", "OK");
@@ -2021,6 +2029,7 @@ void do_command(LONG c)
 static void cleanup(void)
 {
     LONG i;
+    ai_shutdown();
     for (i = 0; i < ndocs; i++) {
         doc = docs[i];          /* Undo-Verlauf gehoert zum jeweiligen Dokument */
         undo_clear();
@@ -2238,7 +2247,7 @@ static void net_test(void)
     enc = b64_encode(raw, 256, &n);
     vl = enc ? b64_decode(enc, n, dec) : 0;
     Printf("Base64: %s\n", (ULONG)(vl == 256 && !memcmp(raw, dec, 256) ? "OK" : "FAILED"));
-    free(enc);
+    net_freemem(enc);
 
     key[0] = 0;
     for (i = 0; i < 2 && !key[0]; i++) {
@@ -2423,11 +2432,13 @@ int main(int argc, char **argv)
 
     while (!quit) {
         ULONG winsig = 1UL << win->UserPort->mp_SigBit;
-        ULONG sigs = Wait(winsig | SIGBREAKF_CTRL_C);
+        ULONG sigs = Wait(winsig | ai_sigmask() | SIGBREAKF_CTRL_C);
         struct IntuiMessage *im;
 
         if (sigs & SIGBREAKF_CTRL_C)
             quit = TRUE;
+        if (sigs & ai_sigmask())
+            ai_poll();
         while ((im = (struct IntuiMessage *)GetMsg(win->UserPort))) {
             ULONG class = im->Class, secs = im->Seconds, mics = im->Micros;
             UWORD code = im->Code, qual = im->Qualifier;
@@ -2459,6 +2470,7 @@ int main(int argc, char **argv)
                 view_flush();
                 view_ants_tick();
                 ui_tick();
+                ai_tick();
                 break;
             }
         }

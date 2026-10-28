@@ -222,6 +222,7 @@ static void overlays(LONG x0, LONG y0, LONG x1, LONG y1)
         view_text_overlay();
     if (view_pen_overlay)
         view_pen_overlay();
+    ai_overlay();
     if (cursor_x >= 0) {
         if (cursor_r >= 3) {
             circle(cursor_x, cursor_y, cursor_r, 0xFF000000);

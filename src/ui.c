@@ -64,6 +64,7 @@ static const MenuItem m_edit[] = {
     { "Copy Merged", "Shift+Ctrl+C", CMD_COPY_MERGED },
     { "Paste", "Ctrl+V", CMD_PASTE }, { "Clear", "Del", CMD_ERASE }, SEP,
     { "Fill...", "Shift+F5", CMD_EDIT_FILL }, { "Stroke...", "", CMD_EDIT_STROKE }, SUB("Quick Fill", m_fill), SEP,
+    { "Generative Fill...", "", CMD_GEN_FILL }, { "Generative Remove", "", CMD_GEN_REMOVE }, SEP,
     { "Free Transform", "Ctrl+T", CMD_FREE_TF }, SUB("Transform", m_transform), SEP,
     { "Toolbar...", "", CMD_TOOLBAR }, { "Screen Mode...", "", CMD_SCREENMODE }, END };
 static const MenuItem m_adjust[] = {
@@ -4591,10 +4592,14 @@ LONG ui_popup(LONG x0, LONG y0, const char **items, LONG n, LONG cur)
 /* ---- Textfeld (modal) ----
  * buf ist UTF-8; Eingaben kommen ueber die Tastaturbelegung als Latin-1. */
 
+BOOL ui_edit_enter;             /* letzte Eingabe mit Return beendet */
+
 BOOL ui_edit_text(LONG x, LONG y, LONG w, char *buf, LONG max)
 {
     BOOL done = FALSE, ok = FALSE, all = buf[0] != 0;  /* all: Inhalt markiert */
     LONG h = 22;
+
+    ui_edit_enter = FALSE;
 
     while (!done) {
         struct IntuiMessage *im;
@@ -4625,7 +4630,7 @@ BOOL ui_edit_text(LONG x, LONG y, LONG w, char *buf, LONG max)
             } else if (class == IDCMP_RAWKEY && !(code & 0x80)) {
                 LONG len = strlen(buf);
                 if (code == 0x44 || code == 0x43)
-                    ok = done = TRUE;
+                    ok = done = ui_edit_enter = TRUE;
                 else if (code == 0x45)
                     done = TRUE;
                 else if (code == 0x41 && all) {             /* Markiertes loeschen */

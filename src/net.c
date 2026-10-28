@@ -24,6 +24,35 @@ struct Library *AmiSSLMasterBase;
 struct Library *AmiSSLBase;
 struct Library *AmiSSLExtBase;
 
+/* Speicher ueber exec statt malloc: die Anfrage laeuft in einem eigenen
+ * Prozess, und malloc von libnix ist nicht fuer mehrere Tasks gedacht */
+void *net_alloc(LONG n)
+{
+    ULONG *p = AllocVec(n + 4, MEMF_ANY);
+    if (!p)
+        return NULL;
+    p[0] = n;
+    return p + 1;
+}
+
+void net_freemem(void *p)
+{
+    if (p)
+        FreeVec((ULONG *)p - 1);
+}
+
+static void *net_realloc(void *p, LONG n)
+{
+    void *q = net_alloc(n);
+    if (q && p) {
+        LONG o = ((ULONG *)p)[-1];
+        CopyMem(p, q, o < n ? o : n);
+    }
+    if (q)
+        net_freemem(p);
+    return q;
+}
+
 static void seterr(NetResp *r, const char *a, const char *b)
 {
     strncpy(r->err, a, sizeof(r->err) - 1);
@@ -212,13 +241,33 @@ BOOL net_https(const char *host, const char *method, const char *path,
     }
 
     /* Anfrage */
-    if (!(req = malloc(512 + strlen(path) + (hdrs ? strlen(hdrs) : 0)))) {
+    if (!(req = net_alloc(512 + strlen(path) + (hdrs ? strlen(hdrs) : 0)))) {
         seterr(r, "Out of memory", NULL);
         goto out;
     }
-    sprintf(req, "%s %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: AmiPixelShop/0.5 (AmigaOS)\r\n"
-                 "Accept-Encoding: identity\r\nConnection: close\r\n%sContent-Length: %ld\r\n\r\n",
-            method, path, host, hdrs ? hdrs : "", (long)blen);
+    /* ohne sprintf: laeuft auch im Hintergrundprozess */
+    {
+        char num[12];
+        LONG i = 11;
+        ULONG v = blen;
+        num[i] = 0;
+        do {
+            num[--i] = '0' + v % 10;
+            v /= 10;
+        } while (v);
+        strcpy(req, method);
+        strcat(req, " ");
+        strcat(req, path);
+        strcat(req, " HTTP/1.1\r\nHost: ");
+        strcat(req, host);
+        strcat(req, "\r\nUser-Agent: AmiPixelShop/0.5 (AmigaOS)\r\n"
+                    "Accept-Encoding: identity\r\nConnection: close\r\n");
+        if (hdrs)
+            strcat(req, hdrs);
+        strcat(req, "Content-Length: ");
+        strcat(req, num + i);
+        strcat(req, "\r\n\r\n");
+    }
     if (SSL_write(ssl, req, strlen(req)) <= 0) {
         seterr(r, "Send failed", NULL);
         goto out;
@@ -240,14 +289,14 @@ BOOL net_https(const char *host, const char *method, const char *path,
 
     /* Antwort bis Verbindungsende lesen */
     cap = 65536;
-    if (!(buf = malloc(cap + 1))) {
+    if (!(buf = net_alloc(cap + 1))) {
         seterr(r, "Out of memory", NULL);
         goto out;
     }
     for (n = 0;;) {
         LONG k;
         if (cap - n < 16384) {
-            UBYTE *nb = realloc(buf, cap * 2 + 1);
+            UBYTE *nb = net_realloc(buf, cap * 2 + 1);
             if (!nb) {
                 seterr(r, "Out of memory", NULL);
                 goto out;
@@ -291,8 +340,8 @@ BOOL net_https(const char *host, const char *method, const char *path,
     ok = TRUE;
 
 out:
-    free(buf);
-    free(req);
+    net_freemem(buf);
+    net_freemem(req);
     if (ssl) {
         if (ok)
             SSL_shutdown(ssl);
@@ -308,7 +357,7 @@ out:
 
 void net_free(NetResp *r)
 {
-    free(r->body);
+    net_freemem(r->body);
     r->body = NULL;
     r->len = 0;
 }
@@ -320,7 +369,7 @@ static const char b64c[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz
 char *b64_encode(const UBYTE *s, LONG n, LONG *outlen)
 {
     LONG ol = (n + 2) / 3 * 4, i;
-    char *o = malloc(ol + 1), *d = o;
+    char *o = net_alloc(ol + 1), *d = o;
     if (!o)
         return NULL;
     for (i = 0; i + 2 < n; i += 3) {
@@ -515,10 +564,7 @@ LONG json_esc(const char *s, char *dst, LONG dmax)
             dst[o++] = 'n';
         } else if (c < 32) {
             dst[o++] = ' ';
-        } else if (c >= 128) {          /* Latin-1 -> UTF-8 */
-            dst[o++] = 0xC0 | (c >> 6);
-            dst[o++] = 0x80 | (c & 63);
-        } else {
+        } else {                        /* auch UTF-8-Bytes unveraendert */
             dst[o++] = c;
         }
     }

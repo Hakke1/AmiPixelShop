@@ -4,7 +4,7 @@ CFLAGS  = -noixemul -O3 -m68040 -m68881 -fno-math-errno -fomit-frame-pointer -Wa
 LDLIBS  = -lamiga -lm
 
 BUILD   = build
-SRCS    = src/main.c src/gfx.c src/pixel.c src/doc.c src/view.c src/paint.c src/select.c src/ui.c src/fileio.c src/stb_impl.c src/move.c src/filter.c src/bench.c src/clip.c src/transform.c src/text.c src/resize.c src/tools.c src/fx.c src/crop.c src/perf.c src/psd.c src/path.c src/liquify.c src/quant.c src/net.c
+SRCS    = src/main.c src/gfx.c src/pixel.c src/doc.c src/view.c src/paint.c src/select.c src/ui.c src/fileio.c src/stb_impl.c src/move.c src/filter.c src/bench.c src/clip.c src/transform.c src/text.c src/resize.c src/tools.c src/fx.c src/crop.c src/perf.c src/psd.c src/path.c src/liquify.c src/quant.c src/net.c src/ai.c
 OBJS    = $(SRCS:src/%.c=$(BUILD)/%.o)
 AOBJS   = $(BUILD)/pixel_asm.o
 VASM    = vasmm68k_mot
@@ -38,6 +38,10 @@ $(BUILD)/gfx.o: src/font_ui.h src/font_bold.h
 
 STB     = -Ithird_party/stb -Ithird_party/zlib
 $(BUILD)/text.o: src/text.c src/apx.h
+	@mkdir -p $(BUILD)
+	$(CC) $(CFLAGS) -Isrc $(STB) -c -o $@ $<
+
+$(BUILD)/ai.o: src/ai.c src/apx.h src/net.h
 	@mkdir -p $(BUILD)
 	$(CC) $(CFLAGS) -Isrc $(STB) -c -o $@ $<
 

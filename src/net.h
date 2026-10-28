@@ -12,7 +12,7 @@
 
 typedef struct NetResp {
     LONG  status;           /* HTTP-Status, 0 = keine Antwort */
-    UBYTE *body;            /* nullterminiert, mit free() freigeben */
+    UBYTE *body;            /* nullterminiert, mit net_free() freigeben */
     LONG  len;
     char  err[128];         /* Fehlertext bei FALSE */
 } NetResp;
@@ -29,8 +29,10 @@ BOOL net_https(const char *host, const char *method, const char *path,
                const char *hdrs, const void *body, LONG blen,
                NetResp *r, NetCtl *ctl);
 void net_free(NetResp *r);
+void *net_alloc(LONG n);         /* AllocVec mit Laenge; in jedem Task nutzbar */
+void net_freemem(void *p);
 
-char *b64_encode(const UBYTE *src, LONG n, LONG *outlen);   /* malloc, nullterminiert */
+char *b64_encode(const UBYTE *src, LONG n, LONG *outlen);   /* net_alloc, nullterminiert */
 LONG  b64_decode(const char *src, LONG n, UBYTE *dst);      /* dst >= n*3/4, liefert Laenge */
 
 /* Wert zu einem Pfad wie "choices.0.message.images.0.image_url.url";
@@ -38,7 +40,7 @@ LONG  b64_decode(const char *src, LONG n, UBYTE *dst);      /* dst >= n*3/4, lie
 const char *json_get(const char *js, const char *path, LONG *len);
 /* String-Wert (inkl. ") entschluesseln, dst nullterminiert; liefert Laenge */
 LONG json_str(const char *v, LONG vlen, char *dst, LONG dmax);
-/* JSON-String-Escape von src nach dst (ohne Anfuehrungszeichen), dst nullterminiert */
+/* JSON-String-Escape (UTF-8) von src nach dst, ohne Anfuehrungszeichen, nullterminiert */
 LONG json_esc(const char *src, char *dst, LONG dmax);
 
 #endif
