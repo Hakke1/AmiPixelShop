@@ -1070,6 +1070,7 @@ static BOOL discard_ok(void)
 }
 
 static const char *ask_ext = ".aps";    /* Vorschlag fuer neue Dateinamen */
+static BOOL ask_as_aps;                 /* Save As: Namen mit .aps vorschlagen (Ebenen behalten) */
 static const char *ask_title;           /* eigener Titel des Dateidialogs oder NULL */
 
 static BOOL ask_file(BOOL save, char *out, LONG outlen)
@@ -1091,7 +1092,7 @@ static BOOL ask_file(BOOL save, char *out, LONG outlen)
         }
     }
     strcpy(init, doc_title());
-    if (!doc->path[0] || strcmp(ask_ext, ".aps")) {
+    if (!doc->path[0] || strcmp(ask_ext, ".aps") || ask_as_aps) {
         char *dot = strrchr(init, '.');
         if (doc->path[0] && dot)
             *dot = 0;           /* Endung ersetzen */
@@ -1225,6 +1226,20 @@ static void open_file(const char *path)
     status_message("Loaded");
 }
 
+/* Ginge beim Speichern als PNG/JPEG/IFF etwas verloren (Ebenen, Text, Masken, Stile ...)? */
+static BOOL doc_is_layered(void)
+{
+    Layer *l = doc->layers[0];
+    return doc->nlayers > 1 || l->mask || l->text || l->fx || l->adj || l->gen || l->ovf ||
+           l->kind != LK_PIXEL || l->opacity < 255 || l->fill < 255 || !l->visible || l->mode != BM_NORMAL;
+}
+
+static BOOL is_aps(const char *path)
+{
+    const char *dot = strrchr(FilePart((STRPTR)path), '.');
+    return dot && !strcasecmp(dot, ".aps");
+}
+
 static void save_file(const char *path)
 {
     char err[80], msg[160];
@@ -1237,6 +1252,12 @@ static void save_file(const char *path)
         sprintf(msg, "Cannot save %s:\n%s", path, err);
         request(msg, "OK");
         status_message("");
+        return;
+    }
+    /* flaches Format bei Ebenen-Dokument: nur eine Kopie (wie Photoshop), das Dokument
+     * behaelt Namen und Aenderungsstatus - sonst gingen die Ebenen beim Schliessen still verloren */
+    if (!is_aps(path) && doc_is_layered()) {
+        status_message("Saved a flattened copy - layers are kept only in .aps");
         return;
     }
     strncpy(doc->path, path, sizeof(doc->path) - 1);
@@ -1725,11 +1746,15 @@ void do_command(LONG c)
             main_activate_doc(docs[(doc_index(doc) + 1) % ndocs]);
         break;
     case CMD_SAVE:
-        if (doc->path[0]) {
+        if (doc->path[0] && (is_aps(doc->path) || !doc_is_layered()))
             save_file(doc->path);
-            break;
+        else {
+            /* neu oder Ebenen in PNG/JPEG/IFF: Save As mit .aps-Vorschlag */
+            ask_as_aps = doc->path[0] != 0;
+            do_command(CMD_SAVEAS);
+            ask_as_aps = FALSE;
         }
-        /* fall through */
+        break;
     case CMD_PAL_LOAD: {
         char err[80], msg[400];
         QPalette *q = AllocVec(sizeof(QPalette), MEMF_ANY | MEMF_CLEAR);
