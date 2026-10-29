@@ -32,6 +32,7 @@
 #include "quant.h"
 #include "stb_image.h"
 #include "stb_image_write.h"
+#include "zlib.h"
 
 extern unsigned char *stbi_zlib_compress(unsigned char *data, int data_len, int *out_len, int quality);
 
@@ -1308,6 +1309,282 @@ BOOL file_save_palette(const char *path, const void *qpal, char *err)
     return ok;
 }
 
+/* ---- TIFF (eigener Lader; akTIFF.datatype setzt Streifen falsch zusammen) ----
+ * Erstes Bild, Streifen, chunky; ungepackt, LZW, PackBits, Deflate; Praediktor 2;
+ * 1/2/4/8/16 Bit Grau/Palette, 8/16 Bit RGB(A), CMYK. Alles andere: NULL ohne
+ * Fehlertext, dann versuchen es die Datatypes. */
+
+typedef struct Tif {
+    const UBYTE *d;
+    LONG len;
+    BOOL le;                    /* "II": little-endian */
+} Tif;
+
+static ULONG tf16(const Tif *t, LONG o)
+{
+    if (o < 0 || o + 2 > t->len)
+        return 0;
+    return t->le ? t->d[o] | t->d[o + 1] << 8 : t->d[o] << 8 | t->d[o + 1];
+}
+
+static ULONG tf32(const Tif *t, LONG o)
+{
+    if (o < 0 || o + 4 > t->len)
+        return 0;
+    return t->le ? (ULONG)t->d[o] | (ULONG)t->d[o + 1] << 8 | (ULONG)t->d[o + 2] << 16 | (ULONG)t->d[o + 3] << 24
+                 : (ULONG)t->d[o] << 24 | (ULONG)t->d[o + 1] << 16 | (ULONG)t->d[o + 2] << 8 | t->d[o + 3];
+}
+
+/* Wert i eines Tags (SHORT oder LONG, inline oder ab Offset) */
+static ULONG tif_val(const Tif *t, LONG ent, LONG i)
+{
+    ULONG type = tf16(t, ent + 2), cnt = tf32(t, ent + 4);
+    LONG sz = type == 3 ? 2 : 4, o = cnt * sz <= 4 ? ent + 8 : (LONG)tf32(t, ent + 8);
+    if ((ULONG)i >= cnt)
+        return 0;
+    if (type == 3)
+        return tf16(t, o + i * 2);
+    if (type == 1)
+        return o + i < t->len ? t->d[o + i] : 0;
+    return tf32(t, o + i * 4);
+}
+
+/* LZW (TIFF 6: MSB zuerst, fruehes Umschalten); liefert erzeugte Bytes */
+static LONG tif_lzw(const UBYTE *src, LONG n, UBYTE *dst, LONG max)
+{
+    static UWORD prefix[4096];
+    static UBYTE suffix[4096], first[4096], stack[4096];
+    ULONG bits = 0;
+    LONG nbits = 0, width = 9, next = 258, old = -1, out = 0, i = 0;
+    for (;;) {
+        LONG code, c, sp = 0;
+        while (nbits < width) {
+            if (i >= n)
+                return out;
+            bits = bits << 8 | src[i++];
+            nbits += 8;
+        }
+        code = (bits >> (nbits - width)) & ((1 << width) - 1);
+        nbits -= width;
+        if (code == 257)
+            return out;
+        if (code == 256) {
+            width = 9;
+            next = 258;
+            old = -1;
+            continue;
+        }
+        if (old < 0) {
+            if (code > 255)
+                return out;
+            if (out < max)
+                dst[out++] = code;
+            old = code;
+            continue;
+        }
+        if (code < next) {
+            c = code;
+        } else if (code == next) {
+            stack[sp++] = old < 256 ? old : first[old];
+            c = old;
+        } else
+            return out;                     /* kaputt */
+        while (c > 255 && sp < 4095) {
+            stack[sp++] = suffix[c];
+            c = prefix[c];
+        }
+        stack[sp++] = c;
+        if (next < 4096) {
+            prefix[next] = old;
+            suffix[next] = c;               /* erstes Zeichen des neuen Strings */
+            first[next] = old < 256 ? old : first[old];
+            next++;
+        }
+        while (sp > 0) {
+            if (out < max)
+                dst[out++] = stack[--sp];
+            else
+                sp--;
+        }
+        old = code;
+        if (next + 1 >= (1 << width) && width < 12)
+            width++;
+    }
+}
+
+static LONG tif_packbits(const UBYTE *src, LONG n, UBYTE *dst, LONG max)
+{
+    LONG i = 0, out = 0;
+    while (i < n && out < max) {
+        LONG c = (BYTE)src[i++], k;
+        if (c >= 0) {
+            for (k = 0; k <= c && i < n && out < max; k++)
+                dst[out++] = src[i++];
+        } else if (c != -128 && i < n) {
+            for (k = 0; k < 1 - c && out < max; k++)
+                dst[out++] = src[i];
+            i++;
+        }
+    }
+    return out;
+}
+
+static Doc *load_tiff(const char *path, char *err)
+{
+    BPTR fh = Open(path, MODE_OLDFILE);
+    UBYTE hd[4], *buf = NULL, *raw = NULL;
+    ULONG *px = NULL, pal[256];
+    Tif t;
+    LONG size, ifd, n, i, e, w = 0, h = 0, bps = 1, spp = 1, comp = 1, photo = -1, rps = 0, planar = 1;
+    LONG pred = 1, extra = 0, stripe = 0, stripc = 0, nstrips = 0, cmap = 0, rowb, y, x, s, tiled = 0;
+    Doc *d = NULL;
+
+    if (!fh)
+        return NULL;
+    if (Read(fh, hd, 4) != 4 || !((hd[0] == 'I' && hd[1] == 'I' && hd[2] == 42 && hd[3] == 0) ||
+                                  (hd[0] == 'M' && hd[1] == 'M' && hd[2] == 0 && hd[3] == 42))) {
+        Close(fh);
+        return NULL;
+    }
+    Seek(fh, 0, OFFSET_END);
+    size = Seek(fh, 0, OFFSET_BEGINNING);
+    if (size <= 8 || !(buf = malloc(size))) {
+        Close(fh);
+        if (size > 8)
+            strcpy(err, "Not enough memory");
+        return NULL;
+    }
+    size = Read(fh, buf, size);
+    Close(fh);
+    t.d = buf;
+    t.len = size;
+    t.le = buf[0] == 'I';
+    ifd = tf32(&t, 4);
+    n = tf16(&t, ifd);
+    for (i = 0; i < n; i++) {
+        e = ifd + 2 + i * 12;
+        switch (tf16(&t, e)) {
+        case 256: w = tif_val(&t, e, 0); break;
+        case 257: h = tif_val(&t, e, 0); break;
+        case 258: bps = tif_val(&t, e, 0); break;
+        case 259: comp = tif_val(&t, e, 0); break;
+        case 262: photo = tif_val(&t, e, 0); break;
+        case 273: stripe = e; nstrips = tf32(&t, e + 4); break;
+        case 277: spp = tif_val(&t, e, 0); break;
+        case 278: rps = tif_val(&t, e, 0); break;
+        case 279: stripc = e; break;
+        case 284: planar = tif_val(&t, e, 0); break;
+        case 317: pred = tif_val(&t, e, 0); break;
+        case 320: cmap = e; break;
+        case 322: tiled = 1; break;
+        case 338: extra = tif_val(&t, e, 0); break;
+        }
+    }
+    if (rps <= 0 || rps > h)
+        rps = h;
+    /* nicht unterstuetzt: den Datatypes ueberlassen */
+    if (w <= 0 || h <= 0 || w > 16000 || h > 16000 || !stripe || !stripc || tiled || planar != 1 ||
+        (comp != 1 && comp != 5 && comp != 8 && comp != 32946 && comp != 32773) ||
+        (bps != 1 && bps != 2 && bps != 4 && bps != 8 && bps != 16) || spp < 1 || spp > 5 ||
+        (bps < 8 && spp != 1) || (photo == 3 && (!cmap || bps > 8)) || photo < 0 || photo > 5 || photo == 4 ||
+        (photo == 2 && spp < 3) || (photo == 5 && spp < 4) || nstrips < (h + rps - 1) / rps)
+        goto out;
+    rowb = (w * spp * bps + 7) / 8;
+    if (!(raw = malloc(rowb * rps + 16)) || !(px = AllocVec(w * h * 4, MEMF_ANY))) {
+        strcpy(err, "Not enough memory");
+        goto out;
+    }
+    if (photo == 3) {
+        LONG nc = 1 << bps;
+        for (i = 0; i < nc; i++)
+            pal[i] = 0xFF000000 | (tif_val(&t, cmap, i) >> 8) << 16 |
+                     (tif_val(&t, cmap, nc + i) >> 8) << 8 | tif_val(&t, cmap, 2 * nc + i) >> 8;
+    }
+    for (s = 0; s * rps < h; s++) {
+        LONG off = tif_val(&t, stripe, s), cnt = tif_val(&t, stripc, s), rows = h - s * rps, got;
+        LONG need;
+        if (rows > rps)
+            rows = rps;
+        need = rowb * rows;
+        if (off < 0 || cnt < 0 || off > size || cnt > size - off)
+            goto out;
+        if (comp == 1) {
+            got = cnt < need ? cnt : need;
+            memcpy(raw, buf + off, got);
+        } else if (comp == 5)
+            got = tif_lzw(buf + off, cnt, raw, need);
+        else if (comp == 32773)
+            got = tif_packbits(buf + off, cnt, raw, need);
+        else {
+            uLongf dl = need;
+            got = uncompress(raw, &dl, buf + off, cnt) == Z_OK ? (LONG)dl : 0;
+        }
+        if (got < need)
+            memset(raw + got, 0, need - got);   /* abgeschnitten: Rest schwarz */
+        for (y = 0; y < rows; y++) {
+            UBYTE *r = raw + y * rowb;
+            ULONG *o = px + (s * rps + y) * w;
+            if (pred == 2 && bps == 8)          /* horizontale Differenzen */
+                for (x = spp; x < w * spp; x++)
+                    r[x] += r[x - spp];
+            else if (pred == 2 && bps == 16)
+                for (x = spp; x < w * spp; x++) {
+                    UBYTE *a = r + x * 2, *b = a - spp * 2;
+                    UWORD v = t.le ? (a[0] | a[1] << 8) + (b[0] | b[1] << 8) : (a[0] << 8 | a[1]) + (b[0] << 8 | b[1]);
+                    if (t.le) { a[0] = v; a[1] = v >> 8; } else { a[0] = v >> 8; a[1] = v; }
+                }
+            for (x = 0; x < w; x++) {
+                ULONG c[5], a = 255;
+                LONG k;
+                for (k = 0; k < spp; k++) {
+                    if (bps == 16) {
+                        const UBYTE *q = r + (x * spp + k) * 2;
+                        c[k] = t.le ? q[1] : q[0];          /* oberes Byte */
+                    } else if (bps == 8)
+                        c[k] = r[x * spp + k];
+                    else {
+                        LONG bit = x * bps;
+                        c[k] = (r[bit >> 3] >> (8 - bps - (bit & 7))) & ((1 << bps) - 1);
+                    }
+                }
+                if (photo == 3) {
+                    o[x] = pal[c[0]];
+                    continue;
+                }
+                if (bps < 8)
+                    c[0] = c[0] * 255 / ((1 << bps) - 1);
+                if (photo <= 1) {
+                    ULONG g = photo == 0 ? 255 - c[0] : c[0];
+                    if (spp >= 2)
+                        a = c[1];
+                    c[0] = c[1] = c[2] = g;
+                } else if (photo == 5) {            /* CMYK, naiv */
+                    ULONG kk = 255 - c[3];
+                    c[0] = (255 - c[0]) * kk / 255;
+                    c[1] = (255 - c[1]) * kk / 255;
+                    c[2] = (255 - c[2]) * kk / 255;
+                    if (spp >= 5)
+                        a = c[4];
+                } else if (spp >= 4)
+                    a = c[3];
+                if (a < 255 && extra == 1 && a) {   /* vormultipliziert */
+                    for (k = 0; k < 3; k++)
+                        c[k] = c[k] * 255 / a > 255 ? 255 : c[k] * 255 / a;
+                }
+                o[x] = a << 24 | c[0] << 16 | c[1] << 8 | c[2];
+            }
+        }
+    }
+    if (!(d = doc_from_argb(w, h, px)))
+        strcpy(err, "Not enough memory");
+out:
+    free(buf);
+    free(raw);
+    if (px)
+        FreeVec(px);
+    return d;
+}
+
 Doc *file_load(const char *path, char *err)
 {
     Doc *d;
@@ -1321,7 +1598,8 @@ Doc *file_load(const char *path, char *err)
             status_message("Not enough memory for all layers - opened the flattened image");
         }
     }
-    else if (!(d = load_iff(path, err)) && !err[0] && !(d = load_stb(path)))
+    else if (!(d = load_iff(path, err)) && !err[0] && !(d = load_tiff(path, err)) && !err[0] &&
+             !(d = load_stb(path)))
         d = load_datatypes(path, err);
     if (d) {
         strncpy(d->path, path, sizeof(d->path) - 1);

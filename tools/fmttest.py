@@ -2,10 +2,18 @@
 """Formattest fuer AmiPixelShop: Referenzbilder erzeugen, auf dem Amiga per CONVERT
 umwandeln lassen, Ergebnisse pixelgenau vergleichen. Ohne PIL (nur zlib + sips).
 
-  tools/fmttest.py gen   <dir>          Referenzen + Amiga-Skript (fmttest.script) erzeugen
+  tools/fmttest.py gen   <dir>          Referenzen + Amiga-Skripte (get.script, fmttest.script) erzeugen
   tools/fmttest.py check <dir> <outdir> Ergebnisse (PNG vom Amiga) vergleichen
+  tools/fmttest.py recv  <outdir>       Ergebnisse vom Amiga annehmen (Port 8069)
+
+Ablauf: make serve (Port 8068), fmttest.py recv <outdir> (Port 8069), auf dem Amiga
+"wget -q -O RAM:g http://HOST:8068/ft/get.script", "Execute RAM:g",
+"Execute Work:qt/ft/fmttest.script", dann check.
 """
 import math, os, struct, subprocess, sys, zlib
+
+HOST = "192.168.178.119"     # Mac: Port 8068 liefert build/, 8069 nimmt Ergebnisse an
+APS = "Work:qt/ft/AmiPixelShop"   # frischer Build aus build/, nicht die installierte Version
 
 # ---------------- PNG schreiben/lesen ----------------
 
@@ -144,6 +152,101 @@ def ilbm_write(path, w, h, px, deep, comp):
     form = b"ILBM" + ck(b"BMHD", bmhd) + (ck(b"CMAP", cmap) if cmap else b"") + ck(b"BODY", bytes(body))
     open(path, "wb").write(b"FORM" + struct.pack(">I", len(form)) + form)
 
+def lzw_tiff(data):
+    """TIFF-LZW wie libtiff: MSB zuerst, Breitenwechsel nach Eintrag 511, Clear bei 4094"""
+    out, acc, nb, width = bytearray(), 0, 0, 9
+    def put(code):
+        nonlocal acc, nb
+        acc = (acc << width | code) & 0xFFFFFFFF; nb += width
+        while nb >= 8:
+            out.append(acc >> (nb - 8) & 255); nb -= 8
+    table, nxt = {}, 258
+    put(256)
+    w = None
+    for b in data:
+        if w is None:
+            w = b; continue
+        k = (w, b)
+        c = table.get(k)
+        if c is not None:
+            w = c; continue
+        put(w)
+        table[k] = nxt; nxt += 1
+        if nxt > 4094:
+            put(256); table = {}; nxt = 258; width = 9
+        elif nxt > (1 << width) - 1:
+            width += 1
+        w = b
+    if w is not None:
+        put(w)
+    put(257)
+    if nb:
+        out.append(acc << (8 - nb) & 255)
+    return bytes(out)
+
+def packbits(row):
+    return byterun1(row)
+
+def tiff_write(path, w, h, rows, spp, bps, photo, comp=1, rps=None, le=False, pred=1, extra=None, cmap=None):
+    """rows: rohe Zeilenbytes (fertig gepackt nach bps); comp 1/5/8/32773"""
+    E = "<" if le else ">"
+    rps = rps or h
+    if pred == 2:
+        rows2 = []
+        for r in rows:
+            r = bytearray(r)
+            if bps == 8:
+                for x in range(len(r) - 1, spp - 1, -1):
+                    r[x] = (r[x] - r[x - spp]) & 255
+            rows2.append(bytes(r))
+        rows = rows2
+    strips = []
+    for y in range(0, h, rps):
+        raw = b"".join(rows[y:y + rps])
+        if comp == 5: raw = lzw_tiff(raw)
+        elif comp == 8: raw = zlib.compress(raw)
+        elif comp == 32773: raw = b"".join(packbits(r) for r in rows[y:y + rps])
+        strips.append(raw)
+    n = len(strips)
+    tags = []
+    def tag(t, ty, vals):
+        tags.append((t, ty, vals))
+    tag(256, 4, [w]); tag(257, 4, [h]); tag(258, 3, [bps] * spp); tag(259, 3, [comp]); tag(262, 3, [photo])
+    tag(273, 4, [0] * n); tag(277, 3, [spp]); tag(278, 4, [rps]); tag(279, 4, [len(x) for x in strips])
+    tag(284, 3, [1])
+    if pred != 1: tag(317, 3, [pred])
+    if cmap: tag(320, 3, cmap)
+    if extra is not None: tag(338, 3, [extra])
+    tags.sort()
+    ifd_off = 8
+    data_off = ifd_off + 2 + 12 * len(tags) + 4
+    blobs, entries = bytearray(), []
+    # Werte > 4 Byte nach dem IFD, Streifen danach
+    for t, ty, vals in tags:
+        sz = 2 if ty == 3 else 4
+        raw = b"".join(struct.pack(E + ("H" if ty == 3 else "I"), v) for v in vals)
+        if len(raw) <= 4:
+            entries.append([t, ty, len(vals), raw.ljust(4, b"\0"), None])
+        else:
+            entries.append([t, ty, len(vals), None, len(blobs)])
+            blobs += raw + (b"\0" if len(raw) & 1 else b"")
+    strip_base = data_off + len(blobs)
+    offs, o = [], strip_base
+    for x in strips:
+        offs.append(o); o += len(x)
+    # Streifen-Offsets eintragen
+    for e in entries:
+        if e[0] == 273:
+            raw = b"".join(struct.pack(E + "I", v) for v in offs)
+            if len(raw) <= 4: e[3] = raw
+            else: blobs[e[4]:e[4] + len(raw)] = raw
+    ifd = struct.pack(E + "H", len(entries))
+    for t, ty, cnt, inl, bo in entries:
+        ifd += struct.pack(E + "HHI", t, ty, cnt) + (inl if inl is not None else struct.pack(E + "I", data_off + bo))
+    ifd += struct.pack(E + "I", 0)
+    hdr = (b"II*\0" if le else b"MM\0*") + struct.pack(E + "I", ifd_off)
+    open(path, "wb").write(hdr + ifd + bytes(blobs) + b"".join(strips))
+
 def sips(src, fmt, dst):
     subprocess.run(["sips", "-s", "format", fmt, src, "--out", dst], check=True, capture_output=True)
 
@@ -164,6 +267,7 @@ def rows8(px, w, h, ch):
 
 # Testfaelle: name -> (eingabedatei, referenz-png, toleranz, alpha-pruefen)
 def gen(d):
+    d = os.path.abspath(d)
     os.makedirs(d, exist_ok=True)
     cases = []
     W, H = 301, 203                     # ungerade, keine Kachelvielfachen
@@ -207,13 +311,51 @@ def gen(d):
     tga_write(f"{d}/rgba.tga", W, H, rgba)
     cases.append(("tga_32", "rgba.tga", "rgba.png", 0))
     # GIF/JPEG/PSD/TIFF ueber sips; Referenz = sips zurueck nach PNG
-    for fmt, ext, tol in (("gif", "gif", 0), ("jpeg", "jpg", 6), ("psd", "psd", 0), ("tiff", "tif", 0)):
+    # JPEG-Referenz: dieselbe stb-Version nativ (Decoder unterscheiden sich sonst an Farbkanten)
+    stb = f"{d}/stbref"
+    src = os.path.join(os.path.dirname(os.path.abspath(__file__)), "stbref.c")
+    inc = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "third_party", "stb")
+    subprocess.run(["cc", "-O2", "-w", "-I" + inc, "-o", stb, src, "-lm"], check=True)
+    for fmt, ext in (("gif", "gif"), ("jpeg", "jpg"), ("psd", "psd"), ("tiff", "tif")):
         sips(f"{d}/rgb.png", fmt, f"{d}/sips.{ext}")
-        sips(f"{d}/sips.{ext}", "png", f"{d}/sips_{ext}_ref.png")
-        cases.append((f"{ext}_sips", f"sips.{ext}", f"sips_{ext}_ref.png", tol))
+        if ext == "jpg":
+            subprocess.run([stb, "dec", f"{d}/sips.jpg", f"{d}/sips_jpg_ref.png"], check=True, cwd=d)
+        else:
+            sips(f"{d}/sips.{ext}", "png", f"{d}/sips_{ext}_ref.png")
+        cases.append((f"{ext}_sips", f"sips.{ext}", f"sips_{ext}_ref.png", 0))
     sips(f"{d}/rgba.png", "gif", f"{d}/sipsa.gif")
     sips(f"{d}/sipsa.gif", "png", f"{d}/sipsa_gif_ref.png")
     cases.append(("gif_transparent", "sipsa.gif", "sipsa_gif_ref.png", 0))
+    # TIFF: eigener Lader (akTIFF.datatype setzt Streifen falsch zusammen)
+    r3, r4 = rows8(rgb, W, H, 3), rows8(rgba, W, H, 4)
+    tiff_write(f"{d}/t_mm_none.tif", W, H, r3, 3, 8, 2, rps=50)
+    cases.append(("tif_mm_none_5strips", "t_mm_none.tif", "rgb.png", 0))
+    tiff_write(f"{d}/t_ii_lzw.tif", W, H, r3, 3, 8, 2, comp=5, rps=16, le=True, pred=2)
+    cases.append(("tif_ii_lzw_pred", "t_ii_lzw.tif", "rgb.png", 0))
+    big3 = rows8(big, BW, BH, 3)
+    tiff_write(f"{d}/t_big_lzw.tif", BW, BH, big3, 3, 8, 2, comp=5, rps=BH)
+    cases.append(("tif_big_lzw_1strip", "t_big_lzw.tif", "big.png", 0))
+    tiff_write(f"{d}/t_rgba_defl.tif", W, H, r4, 4, 8, 2, comp=8, rps=64, extra=2)
+    cases.append(("tif_rgba_deflate", "t_rgba_defl.tif", "rgba.png", 0))
+    tiff_write(f"{d}/t_gray_pb.tif", W, H, [bytes(p[0] for p in gray[y * W:(y + 1) * W]) for y in range(H)], 1, 8, 1, comp=32773, rps=30)
+    cases.append(("tif_gray_packbits", "t_gray_pb.tif", "gray_ref.png", 0))
+    tiff_write(f"{d}/t_rgb16.tif", W, H, [bytes(b for p in rgb[y * W:(y + 1) * W] for v in p[:3] for b in (v, 77)) for y in range(H)], 3, 16, 2, le=False, rps=40)
+    cases.append(("tif_rgb16_mm", "t_rgb16.tif", "rgb.png", 0))
+    tiff_write(f"{d}/t_rgb16le.tif", W, H, [bytes(b for p in rgb[y * W:(y + 1) * W] for v in p[:3] for b in (77, v)) for y in range(H)], 3, 16, 2, le=True, rps=40)
+    cases.append(("tif_rgb16_ii", "t_rgb16le.tif", "rgb.png", 0))
+    cm = [c[0] * 257 for c in cols] + [0] * (256 - len(cols)) + [c[1] * 257 for c in cols] + [0] * (256 - len(cols)) + [c[2] * 257 for c in cols] + [0] * (256 - len(cols))
+    tiff_write(f"{d}/t_pal.tif", W, H, [bytes(lut[p[:3]] for p in pal[y * W:(y + 1) * W]) for y in range(H)], 1, 8, 3, comp=5, rps=20, cmap=cm)
+    png_write(f"{d}/pal_opaque_ref.png", W, H, rows8(pal, W, H, 3), 2)
+    cases.append(("tif_palette_lzw", "t_pal.tif", "pal_opaque_ref.png", 0))
+    tiff_write(f"{d}/t_bw.tif", W, H, [bytes(sum((0x80 >> k) for k in range(8) if x0 + k < W and not bw[y * W + x0 + k][0]) for x0 in range(0, W, 8)) for y in range(H)], 1, 1, 0, rps=100)
+    cases.append(("tif_1bit_whiteiszero", "t_bw.tif", "bw_ref.png", 0))
+    for opt in ("lzw", "packbits"):
+        subprocess.run(["sips", "-s", "format", "tiff", "-s", "formatOptions", opt, f"{d}/rgb.png", "--out", f"{d}/s_{opt}.tif"], check=True, capture_output=True)
+        sips(f"{d}/s_{opt}.tif", "png", f"{d}/s_{opt}_ref.png")
+        cases.append((f"tif_sips_{opt}", f"s_{opt}.tif", f"s_{opt}_ref.png", 0))
+    subprocess.run(["sips", "-s", "format", "tiff", "-s", "formatOptions", "lzw", f"{d}/rgba.png", "--out", f"{d}/s_rgba.tif"], check=True, capture_output=True)
+    sips(f"{d}/s_rgba.tif", "png", f"{d}/s_rgba_ref.png")
+    cases.append(("tif_sips_rgba_lzw", "s_rgba.tif", "s_rgba_ref.png", 1))
     # IFF ILBM: 24 Bit roh/gepackt, Palette gepackt
     ilbm_write(f"{d}/deep.iff", W, H, rgb, True, False)
     cases.append(("ilbm_24bit_raw", "deep.iff", "rgb.png", 0))
@@ -228,17 +370,25 @@ def gen(d):
            ("rt_aps_big", "big.png", "aps", "big.png", 0),
            ("rt_iff_40colors", "pal40.png", "iff", "pal40.png", 0),
            ("rt_iff_alpha", "pal.png", "iff", "pal_ref.png", -1),
-           ("rt_jpg", "rgb.png", "jpg", "rgb.png", 12)]
+           ("rt_jpg", "rgb.png", "jpg", "stb_rt_ref.png", 0)]
+    subprocess.run([stb, "rt", f"{d}/rgb.png", f"{d}/stb_rt_ref.png"], check=True, cwd=d)
     # Amiga-Skript
     sc = ["; erzeugt von tools/fmttest.py", "FailAt 21", "Cd Work:qt/ft", "MakeDir out"]
     for name, inp, ref, tol in cases:
         sc.append(f"Echo \"== {name}\"")
-        sc.append(f"Work:AmiPixelShop/AmiPixelShop CONVERT {inp} out/{name}.png")
+        sc.append(f"{APS} CONVERT {inp} out/{name}.png")
     for name, inp, mid, ref, tol in rts:
         sc.append(f"Echo \"== {name}\"")
-        sc.append(f"Work:AmiPixelShop/AmiPixelShop CONVERT {inp} out/{name}.{mid}")
-        sc.append(f"Work:AmiPixelShop/AmiPixelShop CONVERT out/{name}.{mid} out/{name}.png")
+        sc.append(f"{APS} CONVERT {inp} out/{name}.{mid}")
+        sc.append(f"{APS} CONVERT out/{name}.{mid} out/{name}.png")
+    for name in [c[0] for c in cases] + [r[0] for r in rts]:
+        sc.append(f"wget -q --post-file=out/{name}.png -O NIL: http://{HOST}:8069/{name}.png")
     open(f"{d}/fmttest.script", "w").write("\n".join(sc) + "\n")
+    files = sorted(f for f in os.listdir(d) if not f.endswith("_ref.png") and
+                   f not in ("cases.txt", "get.script", "stbref", "stbref_tmp.jpg"))
+    open(f"{d}/get.script", "w").write("MakeDir Work:qt/ft\n" + "".join(
+        f"wget -q -O Work:qt/ft/{f} http://{HOST}:8068/ft/{f}\n" for f in files) +
+        f"wget -q -O {APS} http://{HOST}:8068/AmiPixelShop\nProtect {APS} +e\n")
     with open(f"{d}/cases.txt", "w") as f:
         for name, inp, ref, tol in cases:
             f.write(f"{name} {ref} {tol}\n")
@@ -283,5 +433,21 @@ def check(d, out):
               + (f"  first at {first[0]},{first[1]}: want {first[2]} got {first[3]}" if first else ""))
     print("ALL OK" if not bad else f"{bad} FAILED")
 
+def recv(out):
+    """Empfaenger fuer "wget --post-file" vom Amiga: speichert unter <out>/<name>"""
+    import http.server
+    os.makedirs(out, exist_ok=True)
+    class H(http.server.BaseHTTPRequestHandler):
+        def do_POST(self):
+            data = self.rfile.read(int(self.headers.get("Content-Length", 0)))
+            name = os.path.basename(self.path)
+            if name:
+                open(os.path.join(out, name), "wb").write(data)
+            self.send_response(200); self.send_header("Content-Length", "2"); self.end_headers(); self.wfile.write(b"ok")
+        def log_message(self, *a):
+            pass
+    http.server.HTTPServer(("", 8069), H).serve_forever()
+
 if __name__ == "__main__":
-    {"gen": lambda: gen(sys.argv[2]), "check": lambda: check(sys.argv[2], sys.argv[3])}[sys.argv[1]]()
+    {"gen": lambda: gen(sys.argv[2]), "check": lambda: check(sys.argv[2], sys.argv[3]),
+     "recv": lambda: recv(sys.argv[2])}[sys.argv[1]]()
