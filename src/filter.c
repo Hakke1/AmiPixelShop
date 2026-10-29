@@ -1086,6 +1086,74 @@ void filter_reduce_fixed(void)
 
 /* ---- Tabelle aller Korrekturen und Filter ---- */
 
+/* ---- Histogramm fuer Levels/Curves: 0 = RGB (alle drei Kanaele), 1..3 = R, G, B ---- */
+
+ULONG hist[4][256];
+
+static void hist_clear(void)
+{
+    memset(hist, 0, sizeof(hist));
+}
+
+/* n Pixel zaehlen; premul: Komposit (vorher entmultiplizieren) */
+static void hist_add(const ULONG *p, const UBYTE *sel, LONG n, BOOL premul, BOOL any_alpha)
+{
+    LONG i;
+    for (i = 0; i < n; i++) {
+        ULONG c = p[i], a = c >> 24, r = (c >> 16) & 0xFF, g = (c >> 8) & 0xFF, b = c & 0xFF;
+        if ((sel && !sel[i]) || (!a && !any_alpha))
+            continue;
+        if (premul && a && a < 255) {
+            r = r * 255 / a; g = g * 255 / a; b = b * 255 / a;
+            if (r > 255) r = 255;
+            if (g > 255) g = 255;
+            if (b > 255) b = 255;
+        }
+        hist[0][r]++; hist[0][g]++; hist[0][b]++;
+        hist[1][r]++; hist[2][g]++; hist[3][b]++;
+    }
+}
+
+/* Filter: Originalpixel der aktiven Ebene (bzw. Maske) im Bearbeitungsbereich */
+static void hist_layer(void)
+{
+    ULONG *row = AllocVec((fl_x1 - fl_x0) * 4, MEMF_ANY);
+    LONG y;
+    hist_clear();
+    if (!row)
+        return;
+    for (y = fl_y0; y < fl_y1; y++) {
+        read_row(fl_x0, y, fl_x1 - fl_x0, row);
+        hist_add(row, doc->hassel ? doc->sel + y * doc->w + fl_x0 : NULL, fl_x1 - fl_x0, FALSE,
+                 doc_target_is_mask());
+    }
+    FreeVec(row);
+}
+
+/* Korrekturebene: Komposit darunter (sonst das ganze Bild) */
+static void hist_below(void)
+{
+    const ULONG *src = doc->bcache && doc->bcache_upto == doc->active ? doc->bcache : doc->flat;
+    LONG y;
+    hist_clear();
+    if (!src)
+        return;
+    for (y = 0; y < doc->h; y++)
+        hist_add(src + y * doc->w, doc->hassel ? doc->sel + y * doc->w : NULL, doc->w, TRUE, FALSE);
+}
+
+static BOOL levels_custom(void (*prev)(void))
+{
+    hist_layer();
+    return levels_dialog(cur->val, prev);
+}
+
+static BOOL curves_custom(void (*prev)(void))
+{
+    hist_layer();
+    return curves_dialog(prev);
+}
+
 static Filter filters[] = {
     { CMD_ADJ_BRICON, "Brightness/Contrast", 2,
       { { "Brightness:", 0, -150, 150, "", 1 }, { "Contrast:", 0, -50, 100, "", 1 } },
@@ -1094,8 +1162,8 @@ static Filter filters[] = {
       { { "Input Black:", 0, 0, 253, "", 1 }, { "Gamma:", 0, 10, 999, "", 100 },
         { "Input White:", 0, 2, 255, "", 1 }, { "Output Black:", 0, 0, 255, "", 1 },
         { "Output White:", 0, 0, 255, "", 1 } },
-      { 0, 100, 255, 0, 255 }, FALSE, NULL, run_levels, NULL },
-    { CMD_ADJ_CURVES, "Curves", 0, { { 0 } }, { 0 }, FALSE, NULL, run_curves, curves_dialog },
+      { 0, 100, 255, 0, 255 }, FALSE, NULL, run_levels, levels_custom },
+    { CMD_ADJ_CURVES, "Curves", 0, { { 0 } }, { 0 }, FALSE, NULL, run_curves, curves_custom },
     { CMD_ADJ_HUESAT, "Hue/Saturation", 3,
       { { "Hue:", 0, -180, 180, "°", 1 }, { "Saturation:", 0, -100, 100, "", 1 },
         { "Lightness:", 0, -100, 100, "", 1 } },
@@ -1311,12 +1379,17 @@ BOOL adjust_dialog(AdjInfo *a, void (*prev)(void))
     BOOL ok;
     if (!f)
         return FALSE;
+    if (a->cmd == CMD_ADJ_LEVELS) {
+        hist_below();
+        return levels_dialog(a->v, prev);
+    }
     if (a->cmd == CMD_ADJ_CURVES) {
         Curve save[4];
         memcpy(save, curves, sizeof(save));
         memcpy(curves, a->curves, sizeof(save));
         adj_curves_target = a;
-        ok = f->custom(prev);
+        hist_below();
+        ok = curves_dialog(prev);
         adj_curves_target = NULL;
         if (ok)
             memcpy(a->curves, curves, sizeof(save));
@@ -1353,7 +1426,7 @@ LONG adjust_sliders(LONG cmd, DlgSlider *out)
 {
     Filter *f = adj_filter(cmd);
     LONG i;
-    if (!f || f->custom)
+    if (!f || (f->custom && cmd != CMD_ADJ_LEVELS))
         return 0;
     for (i = 0; i < f->n; i++)
         out[i] = f->sl[i];

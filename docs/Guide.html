@@ -278,7 +278,7 @@ Brightness/Contrast, Levels, Curves, Hue/Saturation, Desaturate, Invert, Thresho
 <tr bgcolor="#1e1e1e"><th align="left">Active layer</th><th align="left">Shown</th></tr>
 <tr><td>Pixel layer</td><td>Position and size, Free Transform, Flip H / Flip V</td></tr>
 <tr><td>Type layer</td><td>Size, tracking, leading and alignment</td></tr>
-<tr><td>Adjustment layer</td><td>Its sliders, live. Curves: button <i>Edit Curves...</i></td></tr>
+<tr><td>Adjustment layer</td><td>Its sliders, live. Levels/Curves: button <i>Edit Levels...</i> / <i>Edit Curves...</i> with histogram</td></tr>
 <tr><td>Group</td><td>Number of layers, Ungroup, Merge Group</td></tr>
 <tr><td>Generative layer</td><td>Prompt, variants <tt>&lt; 1 / 2 &gt;</tt>, Generate again (see <a href="#aigen">chapter 20</a>)</td></tr>
 <tr><td>Layer mask</td><td>Invert, Apply, Disable/Enable, Delete</td></tr>
@@ -334,6 +334,10 @@ Size and Pressure are in the options bar; Return applies, Esc cancels.
 <p><b>Image &gt; Adjustments</b>: Brightness/Contrast, Levels (Ctrl+L), Curves (Ctrl+M), Hue/Saturation (Ctrl+U),
 Desaturate, Invert (Ctrl+I), Threshold, Posterize - all with live preview.
 For non-destructive work use <a href="#layers">adjustment layers</a>.</p>
+<p><b>Levels</b> shows the histogram of the layer (or of the selection). Drag the black, gray and
+white triangles under it; the darkened bars are the tones that get clipped. <i>Auto</i> sets black and
+white point so that only 0.1&nbsp;% of the pixels are clipped. <b>Curves</b> shows the histogram of the
+chosen channel behind the curve.</p>
 <p><b>Filter</b>: Box Blur, Gaussian Blur, Motion Blur, Add Noise, Median, Mosaic, Sharpen, Sharpen More,
 Unsharp Mask, Emboss, Find Edges, High Pass, Liquify. <b>Ctrl+F</b> repeats the last filter.</p>
 <p>With a selection, filters only work inside it. With a mask active, they work on the mask.</p>

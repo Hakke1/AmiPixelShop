@@ -2235,8 +2235,9 @@ static LONG pr_layout(LONG y0, BOOL draw)
         if (draw)
             text_bold(x, y, l->adj ? adjust_name(l->adj->cmd) : "Adjustment", COL_TEXT);
         y += 24;
-        if (l->adj && l->adj->cmd == CMD_ADJ_CURVES) {
-            pr_button(x, y, 120, "Edit Curves...", CMD_ADJ_EDIT, FALSE, draw);
+        if (l->adj && (l->adj->cmd == CMD_ADJ_CURVES || l->adj->cmd == CMD_ADJ_LEVELS)) {
+            pr_button(x, y, 120, l->adj->cmd == CMD_ADJ_CURVES ? "Edit Curves..." : "Edit Levels...",
+                      CMD_ADJ_EDIT, FALSE, draw);
             y += PR_ROW;
         } else if (!n) {
             if (draw)
@@ -4332,6 +4333,314 @@ BOOL ui_color_picker(const char *title, ULONG *color)
     return ok;
 }
 
+/* ---- Histogramm zeichnen: Saeulen ausserhalb lo..hi abgedunkelt ---- */
+static void hist_draw(const ULONG *h, LONG x0, LONG y0, LONG w, LONG ht, ULONG col, ULONG dim, LONG lo, LONG hi)
+{
+    ULONG mx = 0;
+    LONG i;
+    /* Spitzen an den Enden (reines Schwarz/Weiss) nicht als Massstab */
+    for (i = 1; i < 255; i++)
+        if (h[i] > mx)
+            mx = h[i];
+    if (!mx)
+        mx = h[0] > h[255] ? h[0] : h[255];
+    if (!mx)
+        return;
+    for (i = 0; i < 256; i++) {
+        LONG bh = (LONG)((h[i] * (ULONG)ht + mx - 1) / mx);
+        if (h[i] > mx)
+            bh = ht;
+        if (bh > 0)
+            fill(x0 + i * w / 256, y0 + ht - bh, (i + 1) * w / 256 - i * w / 256, bh,
+                 i < lo || i > hi ? dim : col);
+    }
+}
+
+/* ---- Tonwertkorrektur-Dialog ---- */
+
+#define LV_HH 128               /* Hoehe des Histogramms */
+static LONG lv_x0, lv_y0, lv_w, lv_h, lv_gx, lv_gy, lv_ty, lv_oy, lv_by, lv_drag = -1;
+static LONG *lv_v;
+
+/* Position des Gamma-Dreiecks: dort ergibt die Kurve 50 % */
+static LONG lv_gamma_x(void)
+{
+    float g = lv_v[1] / 100.0f;
+    return lv_v[0] + (LONG)((lv_v[2] - lv_v[0]) * powf(0.5f, g) + 0.5f);
+}
+
+static void lv_tri(LONG cx, LONG ty, ULONG col, BOOL hot)
+{
+    LONG r;
+    for (r = 0; r < 9; r++)
+        fill(cx - r, ty + r, 2 * r + 1, 1, hot ? COL_ACCENT : 0xFF0A0A0A);
+    for (r = 2; r < 8; r++)
+        fill(cx - r + 1, ty + r, 2 * r - 1, 1, col);
+}
+
+static void lv_gradient(LONG y, LONG ht)
+{
+    LONG i;
+    for (i = 0; i < 256; i++)
+        fill(lv_gx + i, y, 1, ht, 0xFF000000 | (ULONG)i * 0x010101);
+}
+
+static void lv_field(LONG x, LONG y, LONG v, BOOL gamma)
+{
+    char buf[16];
+    fill(x, y, 52, 22, COL_FIELD);
+    frame(x, y, 52, 22, COL_LINE);
+    if (gamma)
+        sprintf(buf, "%ld.%02ld", (long)(v / 100), (long)(v % 100));
+    else
+        sprintf(buf, "%ld", (long)v);
+    text(x + (52 - text_width(buf)) / 2, y + 3, buf, COL_TEXT);
+}
+
+/* x der fuenf Zahlenfelder */
+static LONG lv_fx(LONG i)
+{
+    return i == 0 || i == 3 ? lv_gx - 4 : i == 1 ? lv_gx + 128 - 26 : lv_gx + 256 - 48;
+}
+
+static LONG lv_fy(LONG i)
+{
+    return i < 3 ? lv_ty + 14 : lv_oy + 24;
+}
+
+static void lv_draw(void)
+{
+    LONG i;
+    gfx_noclip();
+    fill(lv_x0, lv_y0, lv_w, lv_h, COL_BAR);
+    frame(lv_x0, lv_y0, lv_w, lv_h, COL_LINE);
+    fill(lv_x0 + 1, lv_y0 + 1, lv_w - 2, 26, COL_PANELHD);
+    text_bold(lv_x0 + 12, lv_y0 + 5, "Levels", COL_TEXT);
+    text(lv_x0 + 16, lv_y0 + 38, "Input Levels:", COL_DIM);
+    fill(lv_gx - 1, lv_gy - 1, 258, LV_HH + 2, COL_LINE);
+    fill(lv_gx, lv_gy, 256, LV_HH, COL_FIELD);
+    hist_draw(hist[0], lv_gx, lv_gy, 256, LV_HH, 0xFFB4B4B4, 0xFF5A5A5A, lv_v[0], lv_v[2]);
+    lv_gradient(lv_gy + LV_HH + 3, 8);
+    fill(lv_gx - 10, lv_ty, 276, 10, COL_BAR);
+    lv_tri(lv_gx + lv_v[0], lv_ty, 0xFF000000, lv_drag == 0);
+    lv_tri(lv_gx + lv_gamma_x(), lv_ty, 0xFF808080, lv_drag == 1);
+    lv_tri(lv_gx + lv_v[2], lv_ty, 0xFFFFFFFF, lv_drag == 2);
+    text(lv_x0 + 16, lv_oy - 22, "Output Levels:", COL_DIM);
+    lv_gradient(lv_oy, 8);
+    fill(lv_gx - 10, lv_oy + 10, 276, 10, COL_BAR);
+    lv_tri(lv_gx + lv_v[3], lv_oy + 10, 0xFF000000, lv_drag == 3);
+    lv_tri(lv_gx + lv_v[4], lv_oy + 10, 0xFFFFFFFF, lv_drag == 4);
+    for (i = 0; i < 5; i++)
+        lv_field(lv_fx(i), lv_fy(i), lv_v[i], i == 1);
+    button(lv_x0 + 16, lv_by, 64, 26, "Auto", FALSE);
+    button(lv_x0 + 86, lv_by, 64, 26, "Reset", FALSE);
+    fill(lv_x0 + lv_w - 176, lv_by, 76, 26, COL_ACCENT);
+    frame(lv_x0 + lv_w - 176, lv_by, 76, 26, COL_LINE);
+    text(lv_x0 + lv_w - 176 + (76 - text_width("OK")) / 2, lv_by + 4, "OK", 0xFFFFFFFF);
+    button(lv_x0 + lv_w - 94, lv_by, 80, 26, "Cancel", FALSE);
+}
+
+/* Schwarz-/Weisspunkt so, dass je 0,1 % der Pixel abgeschnitten werden */
+static void lv_auto(void)
+{
+    ULONG total = 0, clip, sum;
+    LONG lo, hi;
+    for (lo = 0; lo < 256; lo++)
+        total += hist[0][lo];
+    if (!total)
+        return;
+    clip = total / 1000;
+    for (lo = 0, sum = 0; lo < 255 && (sum += hist[0][lo]) <= clip; lo++)
+        ;
+    for (hi = 255, sum = 0; hi > 0 && (sum += hist[0][hi]) <= clip; hi--)
+        ;
+    if (hi - lo < 2) {
+        lo = lo > 253 ? 253 : lo;
+        hi = lo + 2;
+    }
+    lv_v[0] = lo;
+    lv_v[1] = 100;
+    lv_v[2] = hi;
+    lv_v[3] = 0;
+    lv_v[4] = 255;
+}
+
+/* Gamma aus der Position des mittleren Dreiecks: 0,5^g = t (Bisektion) */
+static void lv_set_gamma(LONG px)
+{
+    float t = (float)(px - lv_v[0]) / (float)(lv_v[2] - lv_v[0]), lo = 0.10f, hi = 9.99f;
+    LONG i;
+    if (t < 0.002f) t = 0.002f;
+    if (t > 0.93f) t = 0.93f;
+    for (i = 0; i < 24; i++) {
+        float m = (lo + hi) * 0.5f;
+        if (powf(0.5f, m) > t)
+            lo = m;
+        else
+            hi = m;
+    }
+    lv_v[1] = (LONG)((lo + hi) * 50.0f + 0.5f);
+    if (lv_v[1] < 10) lv_v[1] = 10;
+    if (lv_v[1] > 999) lv_v[1] = 999;
+}
+
+static void lv_drag_to(LONG px)
+{
+    if (px < 0) px = 0;
+    if (px > 255) px = 255;
+    switch (lv_drag) {
+    case 0: lv_v[0] = px > lv_v[2] - 2 ? lv_v[2] - 2 : px; break;
+    case 1: lv_set_gamma(px); break;
+    case 2: lv_v[2] = px < lv_v[0] + 2 ? lv_v[0] + 2 : px; break;
+    case 3: lv_v[3] = px; break;
+    case 4: lv_v[4] = px; break;
+    }
+}
+
+/* Zahlenfeld i bearbeiten; Gamma mit Nachkommastellen */
+static void lv_edit(LONG i)
+{
+    char buf[16];
+    const char *b;
+    LONG v = 0, n = 0, frac = 0, fd = 0;
+    if (i == 1)
+        sprintf(buf, "%ld.%02ld", (long)(lv_v[1] / 100), (long)(lv_v[1] % 100));
+    else
+        sprintf(buf, "%ld", (long)lv_v[i]);
+    if (!ui_edit_text(lv_fx(i), lv_fy(i), 52, buf, 5))
+        return;
+    for (b = buf; *b == ' '; b++)
+        ;
+    for (; *b >= '0' && *b <= '9'; b++, n++)
+        v = v * 10 + (*b - '0');
+    if (i == 1 && (*b == '.' || *b == ','))
+        for (b++; *b >= '0' && *b <= '9' && fd < 2; b++, fd++)
+            frac = frac * 10 + (*b - '0');
+    if (!n && !fd)
+        return;
+    if (i == 1) {
+        v = v * 100 + (fd == 1 ? frac * 10 : frac);
+        lv_v[1] = v < 10 ? 10 : v > 999 ? 999 : v;
+        return;
+    }
+    if (v > 255)
+        v = 255;
+    if (i == 0)
+        lv_v[0] = v > lv_v[2] - 2 ? lv_v[2] - 2 : v;
+    else if (i == 2)
+        lv_v[2] = v < lv_v[0] + 2 ? lv_v[0] + 2 : v;
+    else
+        lv_v[i] = v;
+}
+
+BOOL levels_dialog(LONG *v, void (*preview)(void))
+{
+    LONG saved[5], i;
+    BOOL done = FALSE, ok = FALSE, changed = TRUE, need_preview = TRUE;
+    ULONG preview_us = 0;
+
+    memcpy(saved, v, sizeof(saved));
+    lv_v = v;
+    lv_w = 256 + 84;
+    lv_x0 = cvx + cvw - lv_w - 16;
+    lv_y0 = cvy + 16;
+    lv_gx = lv_x0 + 42;
+    lv_gy = lv_y0 + 60;
+    lv_ty = lv_gy + LV_HH + 12;
+    lv_oy = lv_ty + 14 + 22 + 34;
+    lv_by = lv_oy + 24 + 22 + 18;
+    lv_h = lv_by - lv_y0 + 40;
+    lv_drag = -1;
+    view_overlay_cb = lv_draw;
+
+    while (!done) {
+        struct IntuiMessage *im;
+        if (need_preview && (lv_drag < 0 || preview_us < 80000)) {
+            ULONG t = now_us();
+            preview();
+            preview_us = now_us() - t;
+            view_flush();
+            need_preview = FALSE;
+        }
+        if (changed) {
+            lv_draw();
+            blit(lv_x0, lv_y0, lv_w, lv_h);
+            changed = FALSE;
+        }
+        if (Wait((1UL << win->UserPort->mp_SigBit) | SIGBREAKF_CTRL_C) & SIGBREAKF_CTRL_C) {
+            SetSignal(SIGBREAKF_CTRL_C, SIGBREAKF_CTRL_C);
+            done = TRUE;
+        }
+        while ((im = (struct IntuiMessage *)GetMsg(win->UserPort))) {
+            ULONG class = im->Class;
+            UWORD code = im->Code;
+            LONG mx = im->MouseX, my = im->MouseY;
+            ReplyMsg((struct Message *)im);
+
+            if (class == IDCMP_MOUSEBUTTONS && code == SELECTDOWN) {
+                LONG px = mx - lv_gx;
+                lv_drag = -1;
+                if (my >= lv_ty - 4 && my < lv_ty + 12 && px >= -10 && px < 266) {
+                    /* naechstes Dreieck greifen; bei Gleichstand das, das sich wegziehen laesst */
+                    LONG xs[3], best = 1000;
+                    xs[0] = lv_v[0]; xs[1] = lv_gamma_x(); xs[2] = lv_v[2];
+                    for (i = 0; i < 3; i++) {
+                        LONG d = px - xs[i];
+                        if (d < 0) d = -d;
+                        if (d < best || (d == best && ((i == 2 && px > xs[i]) || (i == 0 && px < xs[i])))) {
+                            best = d;
+                            lv_drag = i;
+                        }
+                    }
+                } else if (my >= lv_oy + 6 && my < lv_oy + 22 && px >= -10 && px < 266) {
+                    LONG d3 = px - lv_v[3], d4 = px - lv_v[4];
+                    if (d3 < 0) d3 = -d3;
+                    if (d4 < 0) d4 = -d4;
+                    lv_drag = d3 < d4 || (d3 == d4 && px < lv_v[3]) ? 3 : 4;
+                } else if (my >= lv_by && my < lv_by + 26) {
+                    if (mx >= lv_x0 + 16 && mx < lv_x0 + 80) {
+                        lv_auto();
+                        changed = need_preview = TRUE;
+                    } else if (mx >= lv_x0 + 86 && mx < lv_x0 + 150) {
+                        static const LONG defs[5] = { 0, 100, 255, 0, 255 };
+                        memcpy(lv_v, defs, sizeof(defs));
+                        changed = need_preview = TRUE;
+                    } else if (mx >= lv_x0 + lv_w - 176 && mx < lv_x0 + lv_w - 100)
+                        ok = done = TRUE;
+                    else if (mx >= lv_x0 + lv_w - 94 && mx < lv_x0 + lv_w - 14)
+                        done = TRUE;
+                } else
+                    for (i = 0; i < 5; i++)
+                        if (mx >= lv_fx(i) && mx < lv_fx(i) + 52 && my >= lv_fy(i) && my < lv_fy(i) + 22) {
+                            lv_edit(i);
+                            changed = need_preview = TRUE;
+                        }
+                if (lv_drag >= 0)
+                    changed = TRUE;
+            } else if (class == IDCMP_MOUSEMOVE && lv_drag >= 0) {
+                lv_drag_to(mx - lv_gx);
+                changed = need_preview = TRUE;
+            } else if (class == IDCMP_MOUSEBUTTONS && code == SELECTUP && lv_drag >= 0) {
+                lv_drag_to(mx - lv_gx);
+                lv_drag = -1;
+                changed = need_preview = TRUE;
+            } else if (class == IDCMP_RAWKEY) {
+                if (code == 0x44 || code == 0x43)
+                    ok = done = TRUE;
+                else if (code == 0x45)
+                    done = TRUE;
+            }
+        }
+    }
+    view_overlay_cb = NULL;
+    if (!ok)
+        memcpy(v, saved, sizeof(saved));
+    ui_draw_all();
+    view_inval_all();
+    view_flush();
+    return ok;
+}
+
 /* ---- Gradationskurven-Dialog ---- */
 
 #define CG 256                  /* Groesse des Diagramms */
@@ -4358,6 +4667,7 @@ static void cd_draw(void)
     /* Diagramm */
     fill(cd_gx - 1, cd_gy - 1, CG + 2, CG + 2, COL_LINE);
     fill(cd_gx, cd_gy, CG, CG, COL_FIELD);
+    hist_draw(hist[cd_ch], cd_gx, cd_gy, CG, CG, 0xFF3C3C3C, 0xFF3C3C3C, 0, 255);
     for (i = 1; i < 4; i++) {
         fill(cd_gx + i * CG / 4, cd_gy, 1, CG, 0xFF383838);
         fill(cd_gx, cd_gy + i * CG / 4, CG, 1, 0xFF383838);
