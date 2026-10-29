@@ -213,3 +213,39 @@ void perf_run(void)
         Close(pf);
     pf = 0;
 }
+
+/* "AmiPixelShop FILTERTEST ein.png ausdir": jede Korrektur und jeder Filter mit
+ * Standardwerten, einmal aufs ganze Bild, einmal auf eine Auswahl an der linken
+ * oberen Ecke (Rand + Kachelgrenzen). tools/filtertest.py prueft, dass ausserhalb
+ * der Auswahl nichts veraendert wurde. Kein Bildschirm noetig. */
+void filter_test(const char *in, const char *outdir)
+{
+    static const LONG cmds[] = {
+        CMD_ADJ_BRICON, CMD_ADJ_LEVELS, CMD_ADJ_HUESAT, CMD_ADJ_DESAT, CMD_ADJ_INVERT,
+        CMD_ADJ_THRESH, CMD_ADJ_POSTER, CMD_ADJ_CURVES,
+        CMD_FLT_GAUSS, CMD_FLT_UNSHARP, CMD_FLT_NOISE, CMD_FLT_EMBOSS, CMD_FLT_MOSAIC,
+        CMD_FLT_MOTION, CMD_FLT_BOX, CMD_FLT_MEDIAN, CMD_FLT_SHARPEN, CMD_FLT_SHARPEN_MORE,
+        CMD_FLT_HIGHPASS, CMD_FLT_EDGES };
+    LONG i, s;
+    char path[256], err[80], line[120];
+    for (i = 0; i < (LONG)(sizeof(cmds) / sizeof(cmds[0])); i++)
+        for (s = 0; s < 2; s++) {
+            ULONG t;
+            if (!(doc = file_load(in, err))) {
+                Printf("Load failed: %s\n", (ULONG)err);
+                return;
+            }
+            curves_reset();
+            if (s)          /* Auswahl ueber Kachelgrenzen, an der Ecke anliegend */
+                sel_rect(0, 0, doc->w * 2 / 5 + 3, doc->h / 2 + 5, SEL_NEW);
+            t = filter_perf(cmds[i]);
+            sprintf(path, "%s/f%02ld_%s.png", outdir, (long)i, s ? "sel" : "all");
+            if (!file_save(doc, path, err))
+                Printf("Save failed: %s\n", (ULONG)err);
+            sprintf(line, "%-24s %s %6ld ms\n", adjust_name(cmds[i]), s ? "sel" : "all", (long)(t / 1000));
+            PutStr(line);
+            undo_clear();
+            doc_free(doc);
+            doc = NULL;
+        }
+}

@@ -517,6 +517,8 @@ static void run_huesat(ULONG *p, LONG w, LONG h, const LONG *v, LONG ox, LONG oy
 {
     float dh = v[0] / 360.0f, sf = 1.0f + v[1] / 100.0f, lf = v[2] / 100.0f;
     LONG i, n = w * h;
+    if (!v[0] && !v[1] && !v[2])
+        return;                 /* neutral: exakt unveraendert (das Gitter weicht um 1 ab) */
     /* Gitter (zwischengespeichert): ab einer Kachel lohnt es immer, weil es
      * fuer weitere Kacheln mit denselben Werten wiederverwendet wird */
     if (n >= 4096 || (hs_grid && (LONG)(hs_key[0] * 1e4f) == (LONG)(dh * 1e4f) &&
