@@ -36,6 +36,9 @@ BOOL path_rubber, path_closed_preview;
 LONG rubber_x, rubber_y;
 static LONG pbx0, pby0, pbx1, pby1;     /* Begrenzung des Pfads */
 
+/* Ameisen: Schachbrett aus 4x4-Bloecken (verschoben um die Phase). Nur x+y waere auf
+ * Kanten mit x+y = konstant (nach rechts oben) einfarbig durchgezogen */
+#define ANT_COL(x, y) (((((x) + ant_phase) >> 2) + (((y) + ant_phase) >> 2)) & 1 ? 0xFF000000 : 0xFFFFFFFF)
 static ULONG *ants;             /* (x << 16) | y */
 static LONG nants, maxants;
 static LONG abx0, aby0, abx1, aby1;
@@ -212,7 +215,7 @@ static void overlays(LONG x0, LONG y0, LONG x1, LONG y1)
     gfx_clip(x0, y0, x1, y1);
     for (i = 0; i < nants; i++) {
         LONG x = ants[i] >> 16, y = ants[i] & 0xFFFF;
-        pset(x, y, (((x + y + ant_phase) >> 2) & 1) ? 0xFF000000 : 0xFFFFFFFF);
+        pset(x, y, ANT_COL(x, y));
     }
     if (path_n)
         draw_path();
@@ -465,7 +468,7 @@ void view_ants_tick(void)
     gfx_clip(cvx, cvy, cvx + cvw, cvy + cvh);
     for (i = 0; i < nants; i++) {
         LONG x = ants[i] >> 16, y = ants[i] & 0xFFFF;
-        pset(x, y, (((x + y + ant_phase) >> 2) & 1) ? 0xFF000000 : 0xFFFFFFFF);
+        pset(x, y, ANT_COL(x, y));
     }
     gfx_noclip();
     blit(abx0, aby0, abx1 - abx0, aby1 - aby0);
