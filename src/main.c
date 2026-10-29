@@ -2438,6 +2438,14 @@ int main(int argc, char **argv)
         return RETURN_OK;
     }
 
+    if (argc == 3 && !strcasecmp(argv[1], "LAYERTEST")) {
+        extern void layer_test(const char *outdir);
+        pixel_init();
+        layer_test(argv[2]);
+        cleanup();
+        return RETURN_OK;
+    }
+
     if (argc == 4 && !strcasecmp(argv[1], "FILTERTEST")) {
         extern void filter_test(const char *in, const char *outdir);
         pixel_init();

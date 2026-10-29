@@ -249,3 +249,93 @@ void filter_test(const char *in, const char *outdir)
             doc = NULL;
         }
 }
+
+/* "AmiPixelShop LAYERTEST ausdir": Dokument mit Masken, Gruppe, Schnittmaske,
+ * Mischmodi, Stil und Korrekturebene bauen; zusammengesetzt speichern, als .aps
+ * speichern, neu laden und wieder zusammengesetzt speichern, dazu nach
+ * Flatten. tools/layertest.py vergleicht: alle drei muessen gleich sein. */
+static ULONG disc(LONG x, LONG y)
+{
+    LONG dx = x - 120, dy = y - 90, d = dx * dx + dy * dy;
+    return d < 70 * 70 ? 0xFF000000 | ((ULONG)(x * 3 & 0xFF) << 16) | 0x40 << 8 | (ULONG)(y & 0xFF) :
+           d < 80 * 80 ? (ULONG)((80 * 80 - d) * 255 / (80 * 80 - 70 * 70)) << 24 | 0x2050E0 : 0;
+}
+
+static ULONG lt_band(LONG x, LONG y)
+{
+    return (y > 40 && y < 150) ? 0xC0000000 | ((ULONG)(x & 0xFF) << 8) | 0xE04000 : 0;
+}
+
+static ULONG stripes(LONG x, LONG y)
+{
+    return ((x / 9) & 1) ? 0xFFF0F030 : 0x8000A0FF;
+}
+
+void layer_test(const char *outdir)
+{
+    char path[256], err[80];
+    Layer *l;
+    LayerFx *fx;
+    if (!(doc = doc_new(321, 203, DOC_WHITE)))
+        return;
+    fill_layer(doc->layers[0], photo);
+    /* Ebene 1: Scheibe mit Maske aus Auswahl, Multiplizieren, 80 % */
+    l = doc->layers[doc->active];
+    fill_layer(l, disc);
+    sel_rect(30, 20, 260, 180, SEL_NEW);
+    doc_mask_add(MASK_REVEAL_SEL);
+    l->mode = BM_MULTIPLY;
+    l->opacity = 204;
+    /* Schnittmaske darueber: Streifen auf die Scheibe beschnitten, Overlay */
+    doc_add_layer();
+    l = doc->layers[doc->active];
+    fill_layer(l, stripes);
+    l->mode = BM_OVERLAY;
+    doc_clip_toggle();
+    /* Ebene mit Stil (Schatten, Kontur) in einer Gruppe, Fuellung 60 % */
+    doc_add_layer();
+    l = doc->layers[doc->active];
+    fill_layer(l, lt_band);
+    l->fill = 153;
+    if ((fx = AllocVec(sizeof(LayerFx), MEMF_ANY | MEMF_CLEAR))) {
+        fx->sh_on = 1; fx->sh_opacity = 75; fx->sh_angle = 120; fx->sh_dist = 6; fx->sh_size = 4;
+        fx->sh_color = 0xFF000000;
+        fx->st_on = 1; fx->st_size = 2; fx->st_opacity = 100; fx->st_color = 0xFFFF0000;
+        l->fx = fx;
+        l->fx_valid = FALSE;
+    }
+    doc_group_layers();
+    doc->layers[doc->active]->mode = BM_SCREEN;
+    doc->layers[doc->active]->pass = 0;     /* isoliert, damit der Modus der Gruppe wirkt */
+    /* Korrekturebene oben: Hue/Saturation */
+    if (doc_new_adjust(CMD_ADJ_HUESAT, NULL)) {
+        l = doc->layers[doc->active];
+        l->adj->v[0] = 40; l->adj->v[1] = 25; l->adj->v[2] = -10;
+    }
+    doc_mark_all_dirty();
+    doc_process_dirty();
+    sprintf(path, "%s/before.png", outdir);
+    if (!file_save(doc, path, err)) Printf("save: %s\n", (ULONG)err);
+    sprintf(path, "%s/t.aps", outdir);
+    if (!file_save(doc, path, err)) Printf("save aps: %s\n", (ULONG)err);
+    Printf("%ld layers saved\n", doc->nlayers);
+    undo_clear();
+    doc_free(doc);
+    if (!(doc = file_load(path, err))) {
+        Printf("load: %s\n", (ULONG)err);
+        return;
+    }
+    Printf("%ld layers loaded\n", doc->nlayers);
+    doc_mark_all_dirty();
+    doc_process_dirty();
+    sprintf(path, "%s/after.png", outdir);
+    file_save(doc, path, err);
+    doc_flatten();
+    doc_process_dirty();
+    sprintf(path, "%s/flat.png", outdir);
+    file_save(doc, path, err);
+    Printf("%ld layers after flatten\n", doc->nlayers);
+    undo_clear();
+    doc_free(doc);
+    doc = NULL;
+}
