@@ -1076,11 +1076,20 @@ static BOOL ask_file(BOOL save, char *out, LONG outlen)
 {
     struct FileRequester *fr;
     BOOL ok = FALSE;
-    char init[108];
+    char init[108], docdir[256];
     LONG savemode = save;
 
     if (!AslBase && !(AslBase = OpenLibrary("asl.library", 39)))
         return FALSE;
+    /* Speichern: Ordner des Bildes vorschlagen (wie Photoshop), sonst den zuletzt benutzten */
+    docdir[0] = 0;
+    if (save && doc->path[0]) {
+        LONG n = (char *)PathPart(doc->path) - doc->path;
+        if (n > 0 && n < (LONG)sizeof(docdir)) {
+            memcpy(docdir, doc->path, n);
+            docdir[n] = 0;
+        }
+    }
     strcpy(init, doc_title());
     if (!doc->path[0] || strcmp(ask_ext, ".aps")) {
         char *dot = strrchr(init, '.');
@@ -1094,7 +1103,7 @@ static BOOL ask_file(BOOL save, char *out, LONG outlen)
                                  strcmp(ask_ext, ".aps") ? "Export as IFF ILBM" : "Save As (.aps, .png, .jpg, .iff)"),
         ASLFR_DoSaveMode, savemode,
         ASLFR_RejectIcons, TRUE,
-        ASLFR_InitialDrawer, (ULONG)last_drawer,
+        ASLFR_InitialDrawer, (ULONG)(docdir[0] ? docdir : last_drawer),
         ASLFR_InitialFile, (ULONG)(save ? init : ""),
         ASLFR_InitialWidth, 520,
         ASLFR_InitialHeight, SH * 2 / 3,
@@ -1103,15 +1112,33 @@ static BOOL ask_file(BOOL save, char *out, LONG outlen)
         TAG_DONE);
     if (fr) {
         if (AslRequestTags(fr, TAG_DONE) && fr->fr_File[0]) {
-            strncpy(last_drawer, fr->fr_Drawer, sizeof(last_drawer) - 1);
             strncpy(out, fr->fr_Drawer, outlen - 1);
             out[outlen - 1] = 0;
             ok = AddPart(out, fr->fr_File, outlen) != 0;
+            /* gemerkter Ordner aus dem fertigen Pfad: auch bei "Work:x/bild.png" im Dateifeld */
+            if (ok) {
+                LONG n = (char *)PathPart(out) - out;
+                if (n >= (LONG)sizeof(last_drawer))
+                    n = sizeof(last_drawer) - 1;
+                memcpy(last_drawer, out, n);
+                last_drawer[n] = 0;
+            }
         }
         FreeAslRequest(fr);
     }
     redraw_all();
     return ok;
+}
+
+/* aktuelle Auswahl fuer Reselect merken */
+static void remember_sel(void)
+{
+    if (!doc->hassel)
+        return;
+    if (!doc->lastsel)
+        doc->lastsel = AllocVec(doc->w * doc->h, MEMF_ANY);
+    if (doc->lastsel)
+        CopyMem(doc->sel, doc->lastsel, doc->w * doc->h);
 }
 
 /* laufende Maus-Aktionen sauber beenden (vor Dokumentwechsel) */
@@ -1678,7 +1705,8 @@ void do_command(LONG c)
             break;
         busy(TRUE);
         if (clip_paste() && doc->hassel) {
-            sel_none();         /* wie Photoshop: Einfuegen hebt die Auswahl auf */
+            remember_sel();     /* wie Photoshop: Einfuegen hebt die Auswahl auf, Reselect holt sie */
+            sel_none();
             selection_changed();
         }
         busy(FALSE);
@@ -1876,13 +1904,7 @@ void do_command(LONG c)
         selection_changed();
         break;
     case CMD_SEL_NONE:
-        if (doc->hassel) {
-            /* fuer Reselect merken */
-            if (!doc->lastsel)
-                doc->lastsel = AllocVec(doc->w * doc->h, MEMF_ANY);
-            if (doc->lastsel)
-                CopyMem(doc->sel, doc->lastsel, doc->w * doc->h);
-        }
+        remember_sel();
         sel_none();
         selection_changed();
         break;

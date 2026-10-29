@@ -87,7 +87,7 @@ static const MenuItem m_image[] = {
     { "Crop", "", CMD_CROP }, { "Trim", "", CMD_TRIM }, { "Reveal All", "", CMD_REVEAL_ALL }, SEP,
     { "Duplicate...", "", CMD_DUP_DOC }, END };
 static const MenuItem m_lnew[] = {
-    { "Layer...", "Shift+Ctrl+N", CMD_LAYER_NEW }, { "Group", "", CMD_GROUP_NEW }, SEP,
+    { "Layer", "Shift+Ctrl+N", CMD_LAYER_NEW }, { "Group", "", CMD_GROUP_NEW }, SEP,
     { "Layer via Copy", "Ctrl+J", CMD_LAYER_VIA_COPY }, { "Layer via Cut", "Shift+Ctrl+J", CMD_LAYER_VIA_CUT }, END };
 static const MenuItem m_lstyle[] = {
     { "Layer Style...", "", CMD_LAYER_STYLE }, { "Clear Layer Style", "", CMD_LAYER_STYLE_CLEAR }, END };
@@ -2330,6 +2330,13 @@ static LONG pr_layout(LONG y0, BOOL draw)
         pr_button(x, y, 110, "Merge Group", CMD_MERGE_GROUP, FALSE, draw);
         y += PR_ROW;
         x = px + 10;
+    } else if (text_active() && !l->text) {
+        /* neuer Text wird gerade getippt: die Ebene wird erst beim Uebernehmen zur Textebene */
+        if (draw) {
+            text_bold(x, y, "Type Layer", COL_TEXT);
+            text(x, y + 22, "Typing - Commit or Ctrl+Return", COL_DIM);
+        }
+        y += 46;
     } else {
         LONG bx0, by0, bx1, by1;
         if (draw) {
@@ -2704,7 +2711,7 @@ static BOOL cmd_enabled(LONG c)
         return (doc->ucur ? doc->ucur->next : doc->uhead) != NULL || doc->size_next != NULL;
     case CMD_SEL_NONE: case CMD_SEL_INVERT: case CMD_FEATHER: case CMD_GROW: case CMD_SHRINK:
     case CMD_CROP: case CMD_FILL_FG: case CMD_FILL_BG: case CMD_ERASE: case CMD_MASK_REVEAL_SEL:
-    case CMD_LAYER_VIA_CUT:
+    case CMD_LAYER_VIA_CUT: case CMD_GEN_FILL: case CMD_GEN_REMOVE:
         return doc->hassel;
     case CMD_RESELECT:
         return doc->lastsel != NULL;

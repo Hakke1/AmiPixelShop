@@ -1738,6 +1738,8 @@ enum { BAR_IDLE, BAR_PROMPT };
 static LONG bar_mode = BAR_IDLE;
 static char bar_prompt[200];
 static LONG bar_x, bar_y, bar_w, bar_h;         /* zuletzt gezeichnet, w = 0: keine */
+static LONG bar_drawn_mode = -1;                /* Inhalt der zuletzt gezeichneten Leiste */
+static BOOL bar_recheck;                        /* Inhalt gewechselt: im naechsten Tick ganz neu */
 static LONG bar_secs = -1;
 static LONG bar_sel[4];                         /* Auswahl, fuer die die Leiste offen ist */
 #define BAR_H 34
@@ -1802,6 +1804,15 @@ void ai_overlay(void)
     if (!bar_visible())
         return;
     bar_rect(&x, &y, &w, &h);
+    /* Wechselt der Inhalt bei einem Teil-Neuzeichnen (z. B. Paste hebt die Auswahl
+     * auf, nur die Ebene wird neu gezeichnet), kaeme er nicht auf den Schirm */
+    {
+        LONG mode = job ? 0 : bar_mode == BAR_PROMPT ? 1 : BAR_NOSEL ? 2 : 3;
+        if (mode != bar_drawn_mode) {
+            bar_drawn_mode = mode;
+            bar_recheck = TRUE;
+        }
+    }
     if (!bar_w) {                       /* gezeichneten Umriss merken */
         bar_x = x;
         bar_y = y;
@@ -1878,6 +1889,10 @@ void ai_tick(void)
                                          * alte und neue Lage gemeinsam neu zeichnen */
         return;
     vis = bar_visible();
+    if (bar_recheck) {
+        bar_recheck = FALSE;
+        bar_inval();
+    }
     if (job && !job->done) {
         if (!job->t_up && job->ctl.sent >= job->blen)
             job->t_up = now_us();

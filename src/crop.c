@@ -15,6 +15,7 @@ static float cr_x0, cr_y0, cr_x1, cr_y1;
 static LONG cr_drag;            /* 0 nichts, 1 neu, 2 verschieben, 3.. Griff */
 static float cr_ax, cr_ay;      /* Anker beim Ziehen (Dokument) */
 static float cr_sx0, cr_sy0, cr_sx1, cr_sy1;
+static BOOL cr_fresh, cr_sfresh;  /* Rahmen noch der Start-Rahmen ueber dem ganzen Bild */
 
 /* Griffe: 0..7 = oben links, oben, oben rechts, rechts, unten rechts, unten, unten links, links */
 static void handle_pos(LONG i, LONG *x, LONG *y)
@@ -69,6 +70,7 @@ void crop_begin(void)
     cr_x1 = doc->w;
     cr_y1 = doc->h;
     cr_on = TRUE;
+    cr_fresh = TRUE;
     cr_drag = 0;
     view_transform_overlay = crop_overlay;
     view_inval_all();
@@ -96,6 +98,7 @@ void crop_mouse_down(LONG sx, LONG sy)
     if (!cr_on)
         crop_begin();
     cr_sx0 = cr_x0; cr_sy0 = cr_y0; cr_sx1 = cr_x1; cr_sy1 = cr_y1;
+    cr_sfresh = cr_fresh;
     cr_ax = dx;
     cr_ay = dy;
     for (i = 0; i < 8; i++) {
@@ -106,7 +109,8 @@ void crop_mouse_down(LONG sx, LONG sy)
             return;
         }
     }
-    if (dx >= cr_x0 && dx < cr_x1 && dy >= cr_y0 && dy < cr_y1)
+    /* im unveraenderten Start-Rahmen zieht man wie in PS einen neuen auf */
+    if (!cr_fresh && dx >= cr_x0 && dx < cr_x1 && dy >= cr_y0 && dy < cr_y1)
         cr_drag = 2;
     else {
         cr_drag = 1;
@@ -151,8 +155,10 @@ void crop_mouse_up(LONG sx, LONG sy)
     crop_mouse_move(sx, sy);
     if ((LONG)(cr_x1 - cr_x0) < 1 || (LONG)(cr_y1 - cr_y0) < 1) {
         cr_x0 = cr_sx0; cr_y0 = cr_sy0; cr_x1 = cr_sx1; cr_y1 = cr_sy1;
+        cr_fresh = cr_sfresh;
         view_inval_all();
-    }
+    } else if (cr_drag)
+        cr_fresh = FALSE;
     cr_drag = 0;
 }
 
