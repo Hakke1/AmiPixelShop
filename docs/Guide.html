@@ -122,6 +122,12 @@ AmiPixelShop opens its own screen for maximum speed. Change it later with <b>Edi
 <li>For the <b>AI features</b>: install AmiSSL v5 (Aminet: <tt>util/libs/AmiSSL-v5-OS3</tt>) and enter your
 key with <b>Edit &gt; AI API Key...</b> - see <a href="#ai">chapter 14</a>.
 </ol>
+<p><b>Updates.</b> When the Amiga is online (Roadshow and AmiSSL v5), AmiPixelShop checks GitHub for a
+newer version at start. If there is one, it asks: <i>Install</i> downloads it, replaces the program,
+this Guide and its pictures, and restarts AmiPixelShop (your icon stays as it is; the previous program is
+kept as <tt>AmiPixelShop.old</tt>). <i>Later</i> asks again next time, <i>Skip This Version</i> stays
+quiet until an even newer one comes out. Check by hand with <b>Help &gt; Check for Updates...</b>; turn the
+check at start off with <b>Help &gt; Check for Updates at Start</b>. Without a network nothing happens.</p>
 
 <hr>
 <a name="ui"></a>
@@ -645,7 +651,7 @@ Text and smart objects come in as pixels. Files too large for the memory open fl
 <a name="prefs"></a>
 <h2>25. Settings files</h2>
 <table border="1" cellpadding="4" cellspacing="0" bordercolor="#444444">
-<tr><td><tt>ENVARC:AmiPixelShop.prefs</tt></td><td>Screen mode, toolbar, New Document presets, task bar and AI settings.
+<tr><td><tt>ENVARC:AmiPixelShop.prefs</tt></td><td>Screen mode, toolbar, New Document presets, task bar, AI and update settings.
 Delete it (and the copy in <tt>ENV:</tt>) to reset all settings.</td></tr>
 <tr><td><tt>ENVARC:AmiPixelShop/openrouter.key</tt></td><td>Your OpenRouter API key (set with <b>Edit &gt; AI API Key...</b>).</td></tr>
 </table>

@@ -28,10 +28,11 @@
 #include <stdlib.h>
 #include <math.h>
 #include "apx.h"
+#include "version.h"
 #include "net.h"
 #include "quant.h"
 
-#define APS_VERSION "0.5"
+#define APS_VERSION APS_VER_STR
 /* fuer "Version AmiPixelShop" in der Shell */
 static const char verstag[] __attribute__((used)) = "$VER: AmiPixelShop " APS_VERSION " (28.10.2026) Early Beta";
 
@@ -1772,6 +1773,13 @@ void do_command(LONG c)
     case CMD_GEN_NEXT:
         ai_gen_step(c == CMD_GEN_NEXT ? 1 : -1);
         break;
+    case CMD_UPD_CHECK:
+        upd_check(TRUE);
+        break;
+    case CMD_UPD_AUTO:
+        upd_auto = !upd_auto;
+        ui_prefs_save();
+        break;
     case CMD_TASKBAR:
         ai_taskbar = !ai_taskbar;
         ui_prefs_save();
@@ -2051,10 +2059,16 @@ void do_command(LONG c)
 
 /* ---- Start / Ende ---- */
 
+void main_request_quit(void)
+{
+    quit = TRUE;
+}
+
 static void cleanup(void)
 {
     LONG i;
     ai_shutdown();
+    upd_shutdown();
     for (i = 0; i < ndocs; i++) {
         doc = docs[i];          /* Undo-Verlauf gehoert zum jeweiligen Dokument */
         undo_clear();
@@ -2455,15 +2469,20 @@ int main(int argc, char **argv)
         }
     }
 
+    if (upd_auto && !quit)
+        upd_check(FALSE);
+
     while (!quit) {
         ULONG winsig = 1UL << win->UserPort->mp_SigBit;
-        ULONG sigs = Wait(winsig | ai_sigmask() | SIGBREAKF_CTRL_C);
+        ULONG sigs = Wait(winsig | ai_sigmask() | upd_sigmask() | SIGBREAKF_CTRL_C);
         struct IntuiMessage *im;
 
         if (sigs & SIGBREAKF_CTRL_C)
             quit = TRUE;
         if (sigs & ai_sigmask())
             ai_poll();
+        if (sigs & upd_sigmask())
+            upd_poll();
         while ((im = (struct IntuiMessage *)GetMsg(win->UserPort))) {
             ULONG class = im->Class, secs = im->Seconds, mics = im->Micros;
             UWORD code = im->Code, qual = im->Qualifier;
@@ -2496,6 +2515,7 @@ int main(int argc, char **argv)
                 view_ants_tick();
                 ui_tick();
                 ai_tick();
+                upd_tick();
                 break;
             }
         }
@@ -2506,5 +2526,6 @@ int main(int argc, char **argv)
     if (painting)
         stroke_end();
     cleanup();
+    upd_relaunch();
     return RETURN_OK;
 }

@@ -674,7 +674,7 @@ enum {
     CMD_TF_FREE, CMD_TF_DISTORT, CMD_TF_PERSP, CMD_TF_WARP,
     CMD_FLT_LIQUIFY, CMD_LQ_APPLY, CMD_LQ_CANCEL, CMD_EXPORT_IFF,
     CMD_PAL_LOAD, CMD_PAL_SAVE, CMD_PAL_FIX, CMD_GEN_FILL, CMD_GEN_REMOVE, CMD_SEL_SUBJECT, CMD_REMOVE_BG, CMD_TASKBAR,
-    CMD_AI_SETTINGS, CMD_AI_KEY, CMD_GEN_AGAIN, CMD_GEN_PREV, CMD_GEN_NEXT,
+    CMD_AI_SETTINGS, CMD_AI_KEY, CMD_GEN_AGAIN, CMD_GEN_PREV, CMD_GEN_NEXT, CMD_UPD_CHECK, CMD_UPD_AUTO,
     CMD_GROUP_NEW, CMD_GROUP, CMD_UNGROUP, CMD_MERGE_GROUP, CMD_ADJ_EDIT,
     CMD_NADJ_BRICON, CMD_NADJ_LEVELS, CMD_NADJ_CURVES, CMD_NADJ_HUESAT, CMD_NADJ_DESAT,
     CMD_NADJ_INVERT, CMD_NADJ_THRESH, CMD_NADJ_POSTER, CMD_FLIP_H, CMD_FLIP_V, CMD_ROT180, CMD_ROT90CW, CMD_ROT90CCW,
@@ -727,5 +727,16 @@ void ai_tick(void);
 void ai_overlay(void);
 BOOL ai_bar_click(LONG mx, LONG my);
 void ai_shutdown(void);
+
+/* ---- Update ueber GitHub (update.c) ---- */
+extern BOOL upd_auto;
+extern char upd_skip[32];
+void upd_check(BOOL manual);
+ULONG upd_sigmask(void);
+void upd_poll(void);
+void upd_tick(void);
+void upd_shutdown(void);
+void upd_relaunch(void);
+void main_request_quit(void);
 
 #endif

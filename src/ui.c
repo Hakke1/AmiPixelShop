@@ -156,6 +156,7 @@ static const MenuItem m_window[] = {
     { "Next Document", "Ctrl+Tab", CMD_NEXT_DOC }, SEP,
     { "Contextual Task Bar", "", CMD_TASKBAR }, END };
 static const MenuItem m_help[] = {
+    { "Check for Updates...", "", CMD_UPD_CHECK }, { "Check for Updates at Start", "", CMD_UPD_AUTO }, SEP,
     { "About AmiPixelShop...", "", CMD_ABOUT }, END };
 static const MenuItem m_taa[] = {
     { "Smooth", "", CMD_AA_SMOOTH }, { "Sharp", "", CMD_AA_SHARP }, { "None", "", CMD_AA_NONE }, END };
@@ -1407,6 +1408,17 @@ void ui_prefs_load(void)
     move_autosel = strstr(buf, "autosel=1") != NULL;
     move_autogroup = strstr(buf, "autogroup=1") != NULL;
     ai_taskbar = strstr(buf, "taskbar=0") == NULL;
+    upd_auto = strstr(buf, "updcheck=0") == NULL;
+    {
+        char *q = strstr(buf, "updskip=");
+        LONG k;
+        upd_skip[0] = 0;
+        if (q) {
+            for (q += 8, k = 0; *q && *q != '\n' && k < (LONG)sizeof(upd_skip) - 1; )
+                upd_skip[k++] = *q++;
+            upd_skip[k] = 0;
+        }
+    }
     {
         char *q;
         if ((q = strstr(buf, "aifill=")) && q[7] >= '0' && q[7] <= '2') ai_fill_model = q[7] - '0';
@@ -1438,6 +1450,9 @@ void ui_prefs_save(void)
             (long)move_autogroup, (long)ai_taskbar);
     sprintf(buf + strlen(buf), "aifill=%ld\naifast=%ld\naivar=%ld\n", (long)ai_fill_model,
             (long)ai_fast_model, (long)ai_variants);
+    sprintf(buf + strlen(buf), "updcheck=%ld\n", (long)upd_auto);
+    if (upd_skip[0])
+        sprintf(buf + strlen(buf), "updskip=%s\n", upd_skip);
     if (np_nrecent)
         np_write(buf, "recent=", np_recent, np_nrecent);
     if (np_nsaved)
@@ -2788,7 +2803,7 @@ static void drop_draw(Drop *d)
             if (i == d->hover && en)
                 fill(d->x + 1, y, d->w - 2, 22, COL_ACCENT);
             text(d->x + 22, y + 2, it->label, c);
-            if (it->cmd == CMD_TASKBAR && ai_taskbar) {     /* Haekchen */
+            if ((it->cmd == CMD_TASKBAR && ai_taskbar) || (it->cmd == CMD_UPD_AUTO && upd_auto)) {   /* Haekchen */
                 line(d->x + 7, y + 11, d->x + 10, y + 14, c);
                 line(d->x + 10, y + 14, d->x + 15, y + 6, c);
             }

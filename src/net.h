@@ -15,6 +15,7 @@ typedef struct NetResp {
     UBYTE *body;            /* nullterminiert, mit net_free() freigeben */
     LONG  len;
     char  err[128];         /* Fehlertext bei FALSE */
+    char  location[1024];   /* Ziel einer Weiterleitung (3xx), sonst leer */
 } NetResp;
 
 typedef struct NetCtl {
@@ -29,6 +30,8 @@ BOOL net_https(const char *host, const char *method, const char *path,
                const char *hdrs, const void *body, LONG blen,
                NetResp *r, NetCtl *ctl);
 void net_free(NetResp *r);
+/* GET einer https-URL, folgt bis zu 5 Weiterleitungen */
+BOOL net_get_url(const char *url, const char *hdrs, NetResp *r, NetCtl *ctl);
 void *net_alloc(LONG n);         /* AllocVec mit Laenge; in jedem Task nutzbar */
 void net_freemem(void *p);
 

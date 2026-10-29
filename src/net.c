@@ -18,6 +18,7 @@
 #include <openssl/ssl.h>
 #include <openssl/err.h>
 #include "net.h"
+#include "version.h"
 
 struct Library *SocketBase;
 struct Library *AmiSSLMasterBase;
@@ -260,7 +261,7 @@ BOOL net_https(const char *host, const char *method, const char *path,
         strcat(req, path);
         strcat(req, " HTTP/1.1\r\nHost: ");
         strcat(req, host);
-        strcat(req, "\r\nUser-Agent: AmiPixelShop/0.5 (AmigaOS)\r\n"
+        strcat(req, "\r\nUser-Agent: AmiPixelShop/" APS_VER_STR " (AmigaOS)\r\n"
                     "Accept-Encoding: identity\r\nConnection: close\r\n");
         if (hdrs)
             strcat(req, hdrs);
@@ -327,6 +328,14 @@ BOOL net_https(const char *host, const char *method, const char *path,
     hl = p + 4 - buf;
     {
         const char *te = find_hdr((char *)buf, (char *)p, "Transfer-Encoding");
+        const char *loc = r->status >= 300 && r->status < 400 ?
+                          find_hdr((char *)buf, (char *)p, "Location") : NULL;
+        if (loc) {
+            LONG i;
+            for (i = 0; i < (LONG)sizeof(r->location) - 1 && loc[i] != '\r' && loc[i] != '\n'; i++)
+                r->location[i] = loc[i];
+            r->location[i] = 0;
+        }
         BOOL chunked = te && ieq(te, "chunked", 7);
         LONG bl = n - hl;
         memmove(buf, buf + hl, bl);
@@ -360,6 +369,57 @@ void net_free(NetResp *r)
     net_freemem(r->body);
     r->body = NULL;
     r->len = 0;
+}
+
+/* https://host/pfad zerlegen; host max. 127 Zeichen */
+static BOOL split_url(const char *url, char *host, const char **path)
+{
+    LONG i;
+    if (strncmp(url, "https://", 8))
+        return FALSE;
+    url += 8;
+    for (i = 0; url[i] && url[i] != '/' && i < 127; i++)
+        host[i] = url[i];
+    host[i] = 0;
+    *path = url[i] == '/' ? url + i : "/";
+    return i > 0 && (!url[i] || url[i] == '/');
+}
+
+BOOL net_get_url(const char *url, const char *hdrs, NetResp *r, NetCtl *ctl)
+{
+    char host[128], *cur;
+    const char *path;
+    LONG hop;
+    if (!(cur = net_alloc(1024))) {
+        memset(r, 0, sizeof(*r));
+        seterr(r, "Out of memory", NULL);
+        return FALSE;
+    }
+    strncpy(cur, url, 1023);
+    cur[1023] = 0;
+    for (hop = 0;; hop++) {
+        if (!split_url(cur, host, &path)) {
+            memset(r, 0, sizeof(*r));
+            seterr(r, "Invalid URL", NULL);
+            break;
+        }
+        if (!net_https(host, "GET", path, hdrs, NULL, 0, r, ctl))
+            break;
+        if (r->status < 300 || r->status >= 400 || !r->location[0]) {
+            net_freemem(cur);
+            return TRUE;
+        }
+        if (hop == 5) {
+            seterr(r, "Too many redirects", NULL);
+            net_free(r);
+            break;
+        }
+        strcpy(cur, r->location);
+        net_free(r);
+        hdrs = NULL;            /* z. B. Accept nur fuer die erste Adresse */
+    }
+    net_freemem(cur);
+    return FALSE;
 }
 
 /* ---------- Base64 ---------- */
