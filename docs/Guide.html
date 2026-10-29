@@ -340,14 +340,25 @@ Size and Pressure are in the options bar; Return applies, Esc cancels.
 <p><b>Image &gt; Adjustments</b>: Brightness/Contrast, Levels (Ctrl+L), Curves (Ctrl+M), Hue/Saturation (Ctrl+U),
 Desaturate, Invert (Ctrl+I), Threshold, Posterize - all with live preview.
 For non-destructive work use <a href="#layers">adjustment layers</a>.</p>
-<p><b>Levels</b> shows the histogram of the layer (or of the selection). Drag the black, gray and
-white triangles under it; the darkened bars are the tones that get clipped. <i>Auto</i> sets black and
-white point so that only 0.1&nbsp;% of the pixels are clipped. <b>Curves</b> shows the histogram of the
-chosen channel behind the curve.</p>
 <p><b>Filter</b>: Box Blur, Gaussian Blur, Motion Blur, Add Noise, Median, Mosaic, Sharpen, Sharpen More,
 Unsharp Mask, Emboss, Find Edges, High Pass, Liquify. <b>Ctrl+F</b> repeats the last filter.</p>
 <p>With a selection, filters only work inside it. With a mask active, they work on the mask.</p>
 <p><b>Filter &gt; Amiga</b>: Reduce Colors and palettes, see <a href="#amiga">chapter 22</a>.</p>
+</td>
+</tr>
+</table>
+<table border="0" cellpadding="6" cellspacing="0">
+<tr>
+<td valign="top"><img src="images/levels.jpg" width="344" height="380" alt="Levels dialog"></td>
+<td valign="top">
+<p><b>Levels</b> shows the histogram of the layer (or of the selection). Drag the triangles under it:
+black point, gamma (gray) and white point; the lower bar sets the output range. The darkened bars are
+the tones that get clipped. Click a number to type a value.</p>
+<p><i>Auto</i> sets black and white point so that only 0.1&nbsp;% of the pixels are clipped -
+a quick, safe contrast boost. <i>Reset</i> goes back to 0 / 1.00 / 255.</p>
+<p><b>Curves</b> shows the histogram of the chosen channel behind the curve.</p>
+<p>As adjustment layer: the sliders are in the Properties panel, the button <i>Edit Levels...</i>
+opens this dialog with the histogram of the image below.</p>
 </td>
 </tr>
 </table>
