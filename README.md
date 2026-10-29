@@ -36,6 +36,7 @@ as the Amiga allows. Development is done with the help of **Claude** (Anthropic)
 | **AI** | Generative Fill with a text prompt, Remove (button or brush), Extend / outpainting, Select Subject, Remove Background - variants and Generate again, via OpenRouter directly from the Amiga (AmiSSL) |
 | **Layers** | Up to 64 layers, 25 blend modes, opacity & fill, locks, groups (pass through / isolated), multi-selection, drag &amp; drop |
 | **Masks** | Layer and group masks (linked or unlinked), clipping masks |
+| **Adjustments** | Levels with histogram, draggable sliders and Auto; Curves with histogram; Brightness/Contrast, Hue/Saturation, Threshold, Posterize, ... |
 | **Non-destructive** | Adjustment layers (Levels, Curves, Hue/Saturation, ...), layer styles (Drop Shadow, Outer Glow, Stroke), live Properties panel |
 | **Painting** | Brush, Eraser, Clone Stamp, History Brush, Spot Healing, Blur/Sharpen/Smudge, Dodge/Burn, Gradient, Paint Bucket, Shapes |
 | **Selections** | Marquee, Lasso, Polygonal Lasso, Quick Selection, Magic Wand, Color Range, Grow, Similar, Feather, Expand/Contract |
@@ -43,7 +44,7 @@ as the Amiga allows. Development is done with the help of **Claude** (Anthropic)
 | **Paths** | Pen tool with Bezier curves, Paths panel - make selection, fill, stroke; undoable and saved |
 | **Transform** | Free Transform, Distort, Perspective, Warp, Crop, Image/Canvas Size, Image Rotation, Trim, Reveal All |
 | **Filters** | Liquify, Gaussian, Box & Motion Blur, Unsharp Mask, Sharpen, Median, Add Noise, Emboss, Find Edges, High Pass, Mosaic |
-| **Workflow** | Undo/Redo with History panel and History Brush, multiple documents, Auto-Select move tool, customizable toolbar, tooltips |
+| **Workflow** | Undo/Redo with History panel and History Brush, multiple documents, Auto-Select move tool, customizable toolbar, tooltips, built-in update from GitHub |
 | **Amiga colors** | Reduce Colors with live preview: optimized palettes (24 bit, OCS 12 bit, MagicWB, grayscale), 2-256 colors, EHB, HAM6, HAM8, Floyd-Steinberg / Atkinson / ordered dithering; New Document presets for all classic Amiga screen modes |
 | **Files** | Native `.aps` (keeps everything), layered `.psd` import, IFF ILBM import and export (EHB, HAM, 24 bit, palette and mode kept), PNG, JPEG, plus all formats your datatypes can read |
 

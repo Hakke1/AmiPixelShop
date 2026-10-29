@@ -34,7 +34,7 @@
 
 #define APS_VERSION APS_VER_STR
 /* fuer "Version AmiPixelShop" in der Shell */
-static const char verstag[] __attribute__((used)) = "$VER: AmiPixelShop " APS_VERSION " (28.10.2026) Early Beta";
+static const char verstag[] __attribute__((used)) = "$VER: AmiPixelShop " APS_VERSION " (29.10.2026) Early Beta";
 
 struct IntuitionBase *IntuitionBase;
 struct GfxBase *GfxBase;
