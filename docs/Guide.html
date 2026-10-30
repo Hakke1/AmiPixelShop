@@ -415,6 +415,9 @@ image of the <i>Save Image</i> node.
 <tr><th>Workflow file</th><th>Used for</th></tr>
 <tr><td><tt>comfy_fill.json</tt></td><td>Generative Fill; also Remove and Extend unless <tt>comfy_remove.json</tt>
 exists. The included one uses <b>Flux.1 Fill dev</b>.</td></tr>
+<tr><td><tt>comfy_fill_gguf.json</tt></td><td>The same with a <b>GGUF</b> model such as
+<tt>flux1-fill-dev-Q6_K.gguf</tt> (much smaller). Needs the <i>ComfyUI-GGUF</i> custom node (ComfyUI-Manager) -
+the standard loader does not list .gguf files. Save it as <tt>comfy_fill.json</tt>.</td></tr>
 <tr><td><tt>comfy_fill_sd.json</tt></td><td>Example for any SD 1.5 / SDXL inpainting checkpoint (smaller GPUs) - enter your
 model name and save it as <tt>comfy_fill.json</tt>.</td></tr>
 <tr><td><tt>comfy_remove.json</tt></td><td>Optional: Remove and Extend (for example with LaMa).</td></tr>
@@ -427,6 +430,8 @@ then in a text editor put <tt>"%image%"</tt> as the image of the Load Image node
 prompt text and optionally <tt>"%seed%"</tt> as the seed (a new one for every request, so <b>Generate again</b>
 gives new variants). The first request can take a while because the PC loads the models. If a model is
 missing, the error message lists the ones ComfyUI has. See <tt>ComfyUI/ReadMe.txt</tt>.</p>
+<p>For troubleshooting, every AI request writes its steps to <tt>T:AmiPixelShop-AI.log</tt>
+(sizes, HTTP status, where it stopped).</p>
 
 <h3>Costs and privacy</h3>
 <ul>

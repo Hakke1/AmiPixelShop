@@ -499,6 +499,50 @@ static void cat_limit(char *d, const char *s, LONG max)
     d[n] = 0;
 }
 
+/* Ablauf der letzten Anfrage fuer die Fehlersuche: T:AmiPixelShop-AI.log.
+ * Nur dos.library, daher auch im Hintergrundprozess nutzbar; n < 0: keine Zahl */
+#define AI_LOG "T:AmiPixelShop-AI.log"
+
+static void ai_log(const char *what, const char *s, LONG n)
+{
+    struct DateStamp ds;
+    char line[220], num[16];
+    LONG k = 15, t;
+    BPTR fh = Open((STRPTR)AI_LOG, MODE_READWRITE);
+    if (!fh)
+        return;
+    Seek(fh, 0, OFFSET_END);
+    DateStamp(&ds);
+    t = (ds.ds_Minute % 60) * 6000 + ds.ds_Tick * 2;        /* Hundertstel in der Stunde */
+    num[k] = 0;
+    num[--k] = ' ';
+    num[--k] = '0' + t % 10;
+    num[--k] = '0' + t / 10 % 10;
+    num[--k] = '.';
+    for (t /= 100; k > 7; t /= 10)
+        num[--k] = '0' + t % 10;
+    strcpy(line, num + k);
+    cat_limit(line, what, sizeof(line));
+    if (s) {
+        cat_limit(line, " ", sizeof(line));
+        cat_limit(line, s, sizeof(line));
+    }
+    if (n >= 0) {
+        ULONG v = n;
+        k = 15;
+        num[k] = 0;
+        do {
+            num[--k] = '0' + v % 10;
+            v /= 10;
+        } while (v);
+        num[--k] = ' ';
+        cat_limit(line, num + k, sizeof(line));
+    }
+    cat_limit(line, "\n", sizeof(line));
+    Write(fh, line, strlen(line));
+    Close(fh);
+}
+
 /* Fehlertext aus einer ComfyUI-Antwort; die "details" nennen meist das Problem
  * (z. B. ein Modell, das auf dem PC fehlt) */
 static void comfy_err(AiJob *j, NetResp *r, const char *what)
@@ -546,6 +590,7 @@ static void comfy_run(AiJob *j)
     LONG vl, t, k;
     char id[64], kp[96], path[320], fn[100], sub[100], type[16];
 
+    ai_log("ComfyUI upload to", j->host, j->uplen);
     if (!net_http(j->host, j->port, FALSE, "POST", "/upload/image", j->uphdr, j->up, j->uplen, &r, &j->ctl)) {
         strcpy(j->err, r.err);
         return;
@@ -567,6 +612,7 @@ static void comfy_run(AiJob *j)
     }
     json_str(v, vl, id, sizeof(id));
     net_free(&r);
+    ai_log("ComfyUI queued", id, -1);
 
     /* fertig, sobald der Auftrag in der History steht (beim ersten Mal laedt der PC die Modelle) */
     strcpy(path, "/history/");
@@ -592,6 +638,7 @@ static void comfy_run(AiJob *j)
         net_free(&r);
     }
     js = (const char *)r.body;
+    ai_log("ComfyUI finished, seconds waited:", NULL, t + 1);
     strcpy(kp, id);
     strcat(kp, ".status.status_str");
     if ((v = json_get(js, kp, &vl)) && strstr_n(v, vl, "error")) {
@@ -622,6 +669,7 @@ static void comfy_run(AiJob *j)
         strcpy(j->err, r.err);
         return;
     }
+    ai_log("ComfyUI result", fn, r.len);
     if (r.status == 200 && r.len > 0) {
         j->img = r.body;                /* PNG, wie geliefert */
         j->imglen = r.len;
@@ -639,15 +687,20 @@ static void ai_worker(void)
     const char *v;
     LONG vl;
 
+    ai_log("worker: request", j->path, j->blen);
     if (j->prov == PROV_COMFY) {
         comfy_run(j);
     } else if (!net_https(j->prov == PROV_GEMINI ? GEM_HOST : AI_HOST, "POST", j->path, j->hdr, j->body,
                           j->blen, &r, &j->ctl)) {
         strcpy(j->err, r.err);
     } else if (j->prov == PROV_GEMINI) {
+        ai_log("worker: HTTP status", NULL, r.status);
+        ai_log("worker: answer bytes", NULL, r.len);
         gemini_answer(j, (const char *)r.body, r.status);
         net_free(&r);
     } else {
+        ai_log("worker: HTTP status", NULL, r.status);
+        ai_log("worker: answer bytes", NULL, r.len);
         const char *js = (const char *)r.body;
         if (r.status != 200) {
             if ((v = json_get(js, "error.message", &vl)))
@@ -681,6 +734,10 @@ static void ai_worker(void)
         }
         net_free(&r);
     }
+    if (j->ok)
+        ai_log("worker: image bytes", NULL, j->imglen);
+    else
+        ai_log("worker: error", j->err, -1);
     Forbid();                   /* Prozess endet, bevor der Hauptprozess weiterlaeuft */
     j->done = 1;
     Signal(j->parent, 1UL << j->sig);
@@ -1327,6 +1384,8 @@ static AiJob *job_new(void)
     else
         sprintf(j->hdr, "Authorization: Bearer %s\r\nContent-Type: application/json\r\n"
                         "X-Title: AmiPixelShop\r\n", key);
+    DeleteFile((STRPTR)AI_LOG);
+    ai_log("start:", prov_name[j->prov], -1);
     j->doc = doc;
     j->parent = FindTask(NULL);
     j->sig = ai_sigbit;
@@ -1337,6 +1396,10 @@ static AiJob *job_new(void)
 /* Hintergrundprozess starten; bei Fehler wird j freigegeben */
 static BOOL job_launch(AiJob *j)
 {
+    ai_log("crop", NULL, j->w);
+    ai_log("  x", NULL, j->h);
+    if (j->up)
+        ai_log("upload bytes", NULL, j->uplen);
     j->t0 = now_us();
     job = j;
     if (!CreateNewProcTags(NP_Entry, (ULONG)ai_worker, NP_Name, (ULONG)"AmiPixelShop AI",
@@ -1593,6 +1656,7 @@ static BOOL start_fill(const char *prompt, Layer *target)
         goto fail;
     free(rgb);
     rgb = NULL;
+    ai_log("JPEG bytes", NULL, jpg.n);
     if (!(e64 = b64_encode(jpg.p, jpg.n, &l64)))
         goto fail;
     free(jpg.p);
@@ -2025,6 +2089,7 @@ BOOL ai_segment(LONG kind)
         goto fail;
     free(rgb);
     rgb = NULL;
+    ai_log("JPEG bytes", NULL, jpg.n);
     if (!(e64 = b64_encode(jpg.p, jpg.n, &l64)))
         goto fail;
     free(jpg.p);
@@ -2190,10 +2255,12 @@ void ai_poll(void)
         if (doc_alive(j->doc)) {
             if (j->doc != doc)
                 main_activate_doc(j->doc);
+            ai_log("placing result", NULL, j->imglen);
             if (j->kind == AI_FILL)
                 place_result(j);
             else
                 place_segment(j);
+            ai_log("done", NULL, -1);
         }
     } else if (!j->ctl.cancel) {
         char msg[200];

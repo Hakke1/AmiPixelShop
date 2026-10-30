@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""Rauchtest ohne Amiga: AmiPixelShop LAYERTEST unter vamos (amitools) auf einem
-emulierten 68040 - Ebenen speichern, laden, zusammenfuegen.
+"""Rauchtest ohne Amiga: AmiPixelShop unter vamos (amitools) auf einem emulierten
+68040 - LAYERTEST (Ebenen speichern, laden, zusammenfuegen) und eine JPEG-Runde
+mit CONVERT (PNG -> JPEG -> PNG; der JPEG-Encoder war mit ungeflicktem gcc 16 kaputt).
 
 Aufruf: tools/vamostest.py build/AmiPixelShop <arbeitsverzeichnis>
 Braucht: pip install amitools==0.8.1 machine68k==0.3.0
@@ -9,7 +10,7 @@ Prueft, dass die PNGs gueltig sind (Chunk-CRCs, zlib-Pruefsumme) und das Bild na
 Speichern/Laden und nach dem Zusammenfuegen pixelgleich ist. Die Grafik-Bibliotheken
 werden nur vorgetaeuscht; FILTERTEST geht nicht (vamos kennt FSIN nicht).
 """
-import os, struct, subprocess, sys, zlib
+import math, os, struct, subprocess, sys, zlib
 
 LIBS = "+".join([
     "intuition.library=mode:fake,version:40",
@@ -59,15 +60,28 @@ def pixels(path):
     return (w, h), bytes(out)
 
 
+def write_png(path, w, h, rgb):
+    def chunk(t, d):
+        return struct.pack(">I", len(d)) + t + d + struct.pack(">I", zlib.crc32(t + d) & 0xFFFFFFFF)
+    rows = b"".join(b"\0" + rgb[y * w * 3:(y + 1) * w * 3] for y in range(h))
+    open(path, "wb").write(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0)) +
+                           chunk(b"IDAT", zlib.compress(rows, 6)) + chunk(b"IEND", b""))
+
+
+def vamos(exe, work, *args):
+    log = subprocess.run(
+        ["vamos", "--vols-base-dir", os.path.join(work, "vols"), "-C", "68040", "-H", "disable",
+         "-m", "262144", "-s", "512", "-O", LIBS, os.path.abspath(exe)] + list(args),
+        cwd=work, capture_output=True, text=True, timeout=1200)
+    print(log.stdout.strip())
+    return log
+
+
 def main():
     exe, work = sys.argv[1], os.path.abspath(sys.argv[2])
     os.makedirs(os.path.join(work, "out"), exist_ok=True)
     os.makedirs(os.path.join(work, "vols"), exist_ok=True)
-    log = subprocess.run(
-        ["vamos", "--vols-base-dir", os.path.join(work, "vols"), "-C", "68040", "-H", "disable",
-         "-m", "262144", "-s", "512", "-O", LIBS, os.path.abspath(exe), "LAYERTEST", "out"],
-        cwd=work, capture_output=True, text=True, timeout=1200)
-    print(log.stdout)
+    log = vamos(exe, work, "LAYERTEST", "out")
     if "1 layers after flatten" not in log.stdout:
         print(log.stderr[-3000:])
         sys.exit("LAYERTEST did not finish")
@@ -76,6 +90,20 @@ def main():
     for name in ("after.png", "flat.png"):
         assert pixels(os.path.join(out, name)) == before, name + " differs from before.png"
     print("OK: %dx%d, PNGs valid, save/load and flatten pixel-identical" % before[0])
+
+    # JPEG: weiche Verlaeufe mit etwas Struktur, 256x192
+    w, h = 256, 192
+    rgb = bytes(int(127 + 100 * math.sin(x / 23.0 + c) * math.cos(y / 17.0 - c) + (x * y + 7 * c) % 13)
+                for y in range(h) for x in range(w) for c in range(3))
+    write_png(os.path.join(work, "jin.png"), w, h, rgb)
+    for a, b in (("jin.png", "jout.jpg"), ("jout.jpg", "jback.png")):
+        if vamos(exe, work, "CONVERT", a, b).returncode:
+            sys.exit("CONVERT %s %s failed" % (a, b))
+    size, back = pixels(os.path.join(work, "jback.png"))
+    err = sum(abs(p - q) for p, q in zip(rgb, back)) / len(rgb)
+    print("JPEG round trip: %d bytes, mean error %.2f" % (os.path.getsize(os.path.join(work, "jout.jpg")), err))
+    assert size == (w, h) and err < 6, "JPEG round trip broken"      # stb q90 here: 3.30
+    print("OK: JPEG")
 
 
 main()

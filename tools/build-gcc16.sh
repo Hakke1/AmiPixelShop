@@ -19,6 +19,18 @@ cd "$WORK"
 cp default-repos .repos
 sed -i -E "s#^gcc[[:space:]].*#gcc $REPO/gcc amiga16.2#" .repos
 mkdir -p "$PREFIX"
+
+# gcc selbst holen und flicken, bevor make es baut: in fix_trunc*si2 (float -> int
+# auf dem 68040, ueber FPCR) fehlt den Hilfsregistern das early-clobber "&". gcc 16
+# (LRA) legt dann das FPCR-Sicherungsregister auf ein Register, das die Zieladresse
+# noch braucht - so schreibt z. B. der JPEG-Encoder von stb jeden Koeffizienten an
+# die falsche Stelle (unbrauchbare JPEGs, auch die an die KI gesendeten Bilder).
+[ -f projects/gcc/configure ] || git clone -b amiga16.2 --depth 16 "$REPO/gcc" projects/gcc
+sed -i -E '/define_insn "fix_trunc[a-z]+[sqh]i2"/,/TUNE_68040/ s/(match_scratch:SI [23]) "=d"/\1 "=\&d"/' \
+    projects/gcc/gcc/config/m68k/m68k.md
+[ "$(grep -c 'match_scratch:SI [23] "=&d"' projects/gcc/gcc/config/m68k/m68k.md)" -eq 6 ] ||
+    { echo "fix_trunc patch did not apply" >&2; exit 1; }
+
 # Wie "make min", aber ohne libnix4.library (laesst sich mit gcc 16 nicht linken, unnoetig).
 # WERROR=: libnix baut sonst mit -Werror, und gcc 16 warnt dort (maybe-uninitialized)
 make -j"$(nproc)" binutils gcc gprof libnix libgcc ndk netinclude vasm lha sfdc fd2sfd PREFIX="$PREFIX" \
