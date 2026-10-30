@@ -18,8 +18,9 @@ cd "$WORK"
 cp default-repos .repos
 sed -i -E "s#^gcc[[:space:]].*#gcc $REPO/gcc amiga16.2#" .repos
 mkdir -p "$PREFIX"
+# WERROR=: libnix baut sonst mit -Werror, und gcc 16 warnt dort (maybe-uninitialized)
 make -j"$(nproc)" min ndk netinclude vasm lha sfdc fd2sfd PREFIX="$PREFIX" \
-     NDK_URL=https://aminet.net/dev/misc/NDK3.2.lha
+     NDK_URL=https://aminet.net/dev/misc/NDK3.2.lha WERROR=
 make sdk=p96 PREFIX="$PREFIX"
 
 # AmiSSL: nur die Header (net.c oeffnet die Bibliotheken selbst)
