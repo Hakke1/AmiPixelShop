@@ -82,11 +82,9 @@ sh tools/mkpkg.sh   # build/AmiPixelShop.lha and the update package
 The gcc 16 toolchain (bebbo's `amiga16.2`, with NDK 3.2, Roadshow, P96 and AmiSSL headers) can be
 built on Linux or WSL with `sh tools/build-gcc16.sh /opt/amiga16` (30-60 minutes), then
 `make PATH=/opt/amiga16/bin:$PATH`. GitHub Actions (`.github/workflows/build.yml`) does the same,
-with the toolchain cached, and cross-checks with gcc 6.5 in Docker:
-
-```sh
-docker run --rm -v "$PWD":/src -w /src sacredbanana/amiga-compiler:m68k-amigaos make
-```
+with the toolchain cached, and test-runs the result on an emulated 68040
+(`tools/vamostest.py`). Do not use gcc 6.5 (e.g. the `sacredbanana/amiga-compiler` image): its build
+writes PNG and .aps files with broken checksums.
 
 Notes: compile with `-m68040 -m68881` and link with `-mcpu=68020 -m68881` (see `Makefile`) -
 otherwise the math library goes through the Amiga math libraries and clobbers the FPU registers.

@@ -2083,7 +2083,7 @@ void ai_key_dialog(void)
 {
     const char **files = key_files[ai_provider], *pn = prov_name[ai_provider];
     BOOL gem = ai_provider == PROV_GEMINI, comfy = ai_provider == PROV_COMFY;
-    char key[160], hdr[220], msg[240], val[40], host[64];
+    char key[160], hdr[220], msg[320], val[40], host[64];
     LONG port;
     LONG bw = 560, bh = 118, bx = cvx + (cvw - bw) / 2, by = cvy + (cvh - bh) / 2, k;
     NetResp r;

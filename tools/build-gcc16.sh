@@ -5,7 +5,8 @@
 #   sh tools/build-gcc16.sh [PREFIX]      (Vorgabe /opt/amiga16, dauert 30-60 Minuten)
 #
 # Debian/Ubuntu braucht: make git wget gcc g++ libgmp-dev libmpfr-dev libmpc-dev
-# flex bison gettext texinfo libncurses-dev autoconf rsync lhasa
+# flex bison gettext texinfo libncurses-dev autoconf automake rsync - aber kein lhasa:
+# ist schon ein lha da, baut amiga-gcc keines, und lhasa kann keine Archive anlegen
 # Danach: make PATH="$PREFIX/bin:$PATH"
 set -e
 PREFIX=${1:-/opt/amiga16}
@@ -18,11 +19,13 @@ cd "$WORK"
 cp default-repos .repos
 sed -i -E "s#^gcc[[:space:]].*#gcc $REPO/gcc amiga16.2#" .repos
 mkdir -p "$PREFIX"
+# Wie "make min", aber ohne libnix4.library (laesst sich mit gcc 16 nicht linken, unnoetig).
 # WERROR=: libnix baut sonst mit -Werror, und gcc 16 warnt dort (maybe-uninitialized)
-make -j"$(nproc)" min ndk netinclude vasm lha sfdc fd2sfd PREFIX="$PREFIX" \
+make -j"$(nproc)" binutils gcc gprof libnix libgcc ndk netinclude vasm lha sfdc fd2sfd PREFIX="$PREFIX" \
      NDK_URL=https://aminet.net/dev/misc/NDK3.2.lha WERROR=
 make sdk=p96 PREFIX="$PREFIX"
 
+export PATH="$PREFIX/bin:$PATH"
 # AmiSSL: nur die Header (net.c oeffnet die Bibliotheken selbst)
 mkdir -p amissl
 wget -q -O amissl/sdk.lha "$AMISSL_URL"
