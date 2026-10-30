@@ -22,8 +22,8 @@ mkdir -p "$PREFIX"
 
 # gcc selbst holen und flicken, bevor make es baut: in fix_trunc*si2 (float -> int
 # auf dem 68040, ueber FPCR) fehlt den Hilfsregistern das early-clobber "&". gcc 16
-# (LRA) legt dann das FPCR-Sicherungsregister auf ein Register, das die Zieladresse
-# noch braucht - so schreibt z. B. der JPEG-Encoder von stb jeden Koeffizienten an
+# (mit und ohne -mlra; gcc 6.5 zufaellig nicht) legt dann das FPCR-Sicherungsregister
+# auf ein Register, das die Zieladresse noch braucht - so schreibt z. B. der JPEG-Encoder von stb jeden Koeffizienten an
 # die falsche Stelle (unbrauchbare JPEGs, auch die an die KI gesendeten Bilder).
 [ -f projects/gcc/configure ] || git clone -b amiga16.2 --depth 16 "$REPO/gcc" projects/gcc
 sed -i -E '/define_insn "fix_trunc[a-z]+[sqh]i2"/,/TUNE_68040/ s/(match_scratch:SI [23]) "=d"/\1 "=\&d"/' \
