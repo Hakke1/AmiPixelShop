@@ -1424,7 +1424,7 @@ void ui_prefs_load(void)
         if ((q = strstr(buf, "aifill=")) && q[7] >= '0' && q[7] <= '2') ai_fill_model = q[7] - '0';
         if ((q = strstr(buf, "aifast=")) && q[7] >= '0' && q[7] <= '1') ai_fast_model = q[7] - '0';
         if ((q = strstr(buf, "aivar=")) && q[6] >= '1' && q[6] <= '3') ai_variants = q[6] - '0';
-        if ((q = strstr(buf, "aiprov=")) && q[7] >= '0' && q[7] <= '1') ai_provider = q[7] - '0';
+        if ((q = strstr(buf, "aiprov=")) && q[7] >= '0' && q[7] <= '2') ai_provider = q[7] - '0';
     }
     for (i = 0; i < T_COUNT && !tool_visible[i]; i++)
         ;

@@ -22,7 +22,8 @@
 #include "zlib.h"
 
 #define UPD_HOST  "api.github.com"
-#define UPD_PATH  "/repos/radi7777/AmiPixelShop/releases/latest"
+#define UPD_REPO  "Hakke1/AmiPixelShop"     /* Fork: Updates von hier, nicht vom Original */
+#define UPD_PATH  "/repos/" UPD_REPO "/releases/latest"
 #define UPD_ASSET "AmiPixelShop.upd"
 #define UPD_EXE   "AmiPixelShop"
 #define UPD_MAXF  64
@@ -338,7 +339,7 @@ static void found(UpdJob *j)
     if (!j->url[0]) {
         if (j->manual) {
             sprintf(msg, "AmiPixelShop %s is available.\nPlease download it from\n"
-                    "github.com/radi7777/AmiPixelShop/releases", nice(j->tag));
+                    "github.com/" UPD_REPO "/releases", nice(j->tag));
             request(msg, "OK");
         }
         return;

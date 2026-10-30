@@ -1,6 +1,6 @@
 /*
- * ai.c - KI-Funktionen ueber OpenRouter oder direkt Google Gemini:
- * Generative Fill und Remove
+ * ai.c - KI-Funktionen ueber OpenRouter, direkt Google Gemini oder ComfyUI
+ * im lokalen Netz: Generative Fill und Remove
  *
  * Ablauf: Ausschnitt um die Auswahl (mit Umgebung) als JPEG und die Auswahl
  * als Schwarz-Weiss-Maske an ein Bildmodell schicken. Die Anfrage laeuft in
@@ -24,6 +24,8 @@ BOOL crop_active(void);
 
 #define AI_HOST     "openrouter.ai"
 #define GEM_HOST    "generativelanguage.googleapis.com"
+#define COMFY_PORT  8188
+#define COMFY_IN    "amipixelshop_in.png"   /* Name des hochgeladenen Bildes in ComfyUI */
 #define AI_MINSIDE  768         /* lange Seite des gesendeten Ausschnitts */
 #define AI_MAXSIDE  1024
 
@@ -34,6 +36,11 @@ typedef struct AiJob {
     char hdr[320];              /* Kopfzeilen mit Schluessel */
     LONG prov;                  /* PROV_* */
     char path[160];             /* Anfragepfad (Gemini: mit Modellname) */
+    char host[64];              /* ComfyUI: Rechner und Port */
+    LONG port;
+    char *up;                   /* ComfyUI: Upload (multipart, net_alloc) */
+    LONG uplen;
+    char uphdr[96];
     struct Task *parent;
     LONG sig;
     volatile LONG done;
@@ -65,11 +72,13 @@ static const char *fill_models[] = { "google/gemini-nano-banana-2.1", "google/ge
                                      "google/gemini-3.1-flash-lite-image" };
 static const char *fast_models[] = { "google/gemini-3.1-flash-lite-image", "google/gemini-nano-banana-2.1" };
 LONG ai_fill_model, ai_fast_model, ai_variants = 1, ai_provider;
-enum { PROV_OPENROUTER, PROV_GEMINI };
-static const char *prov_name[] = { "OpenRouter", "Google Gemini" };
+enum { PROV_OPENROUTER, PROV_GEMINI, PROV_COMFY };
+static const char *prov_name[] = { "OpenRouter", "Google Gemini", "ComfyUI" };
+/* Schluessel; bei ComfyUI die Serveradresse */
 static const char *key_files[][2] = {
     { "ENV:AmiPixelShop/openrouter.key", "ENVARC:AmiPixelShop/openrouter.key" },
-    { "ENV:AmiPixelShop/gemini.key", "ENVARC:AmiPixelShop/gemini.key" } };
+    { "ENV:AmiPixelShop/gemini.key", "ENVARC:AmiPixelShop/gemini.key" },
+    { "ENV:AmiPixelShop/comfyui.server", "ENVARC:AmiPixelShop/comfyui.server" } };
 static LONG session_mc;         /* Kosten dieser Sitzung, 1/100 Cent */
 static LONG regen_left;         /* noch zu erzeugende Varianten */
 static Layer *regen_layer;
@@ -162,6 +171,134 @@ static char *body_start(AiJob *j, char *p, BOOL fill, LONG ri)
                 m, (long)ratios[ri][0], (long)ratios[ri][1]);
     }
     return p + strlen(p);
+}
+
+/* "http://rechner:port/" -> host, port */
+static void comfy_addr(const char *s, char *host, LONG max, LONG *port)
+{
+    LONG n = 0;
+    if (!strncmp(s, "http://", 7))
+        s += 7;
+    while (*s && *s != ':' && *s != '/' && n < max - 1)
+        host[n++] = *s++;
+    host[n] = 0;
+    *port = *s == ':' ? atol(s + 1) : COMFY_PORT;
+    if (*port <= 0 || *port > 65535)
+        *port = COMFY_PORT;
+}
+
+/* Workflow aus ENV:, ENVARC: oder PROGDIR:ComfyUI/ ganz lesen (malloc, nullterminiert) */
+static char *read_workflow(const char *name)
+{
+    static const char *dirs[] = { "ENV:AmiPixelShop/", "ENVARC:AmiPixelShop/", "PROGDIR:ComfyUI/" };
+    LONG d, n, cap = 262144;
+    char path[96], *b;
+    BPTR fh;
+    for (d = 0; d < 3; d++) {
+        strcpy(path, dirs[d]);
+        strcat(path, name);
+        if (!(fh = Open((STRPTR)path, MODE_OLDFILE)))
+            continue;
+        b = malloc(cap);
+        n = b ? Read(fh, b, cap - 1) : 0;
+        Close(fh);
+        if (n > 0 && n < cap - 1) {
+            b[n] = 0;
+            return b;
+        }
+        free(b);
+    }
+    return NULL;
+}
+
+static BOOL have_workflow(const char *name)
+{
+    char *t = read_workflow(name);
+    free(t);
+    return t != NULL;
+}
+
+/* /prompt-Anfrage aus dem Workflow (API-Format) mit den Platzhaltern
+ * %prompt%, %image% und %seed%; meldet Fehler selbst */
+static BOOL comfy_body(AiJob *j, const char *name, const char *prompt)
+{
+    static ULONG cnt;
+    char *t, *esc, *p, seed[12], msg[300];
+    const char *s;
+    LONG pl = strlen(prompt), n = 0;
+
+    if (!(t = read_workflow(name))) {
+        sprintf(msg, "No ComfyUI workflow %s found.\n\nIn ComfyUI use Workflow > Export (API) and save\n"
+                     "the file as ENVARC:AmiPixelShop/%s\n(examples: ComfyUI drawer of AmiPixelShop)", name, name);
+        request(msg, "OK");
+        return FALSE;
+    }
+    if (!strstr(t, "\"class_type\"") || !strstr(t, "%image%")) {
+        free(t);
+        sprintf(msg, "The ComfyUI workflow %s cannot be used.\n\nExport it with Workflow > Export (API), and put\n"
+                     "%%image%% as the image name of the Load Image node\nand %%prompt%% into the prompt text.", name);
+        request(msg, "OK");
+        return FALSE;
+    }
+    for (s = t; (s = strstr(s, "%prompt%")); s++)
+        n++;
+    sprintf(seed, "%lu", (unsigned long)((now_us() ^ (++cnt * 2654435761UL)) & 0x7FFFFFFF));
+    if (!(esc = malloc(pl * 2 + 8)) || !(j->body = net_alloc(strlen(t) + n * (pl * 2 + 8) + 256))) {
+        free(esc);
+        free(t);
+        status_message("Not enough memory");
+        return FALSE;
+    }
+    json_esc(prompt, esc, pl * 2 + 8);
+    strcpy(j->body, "{\"client_id\":\"amipixelshop\",\"prompt\":");
+    for (p = j->body + strlen(j->body), s = t; *s;) {
+        if (!strncmp(s, "\"%seed%\"", 8) || !strncmp(s, "%seed%", 6)) {      /* Zahl, ohne Anfuehrungszeichen */
+            s += *s == '"' ? 8 : 6;
+            strcpy(p, seed);
+        } else if (!strncmp(s, "%prompt%", 8)) {
+            s += 8;
+            strcpy(p, esc);
+        } else if (!strncmp(s, "%image%", 7)) {
+            s += 7;
+            strcpy(p, COMFY_IN);
+        } else {
+            *p++ = *s++;
+            continue;
+        }
+        p += strlen(p);
+    }
+    strcpy(p, "}");
+    j->blen = p + 1 - j->body;
+    free(esc);
+    free(t);
+    return TRUE;
+}
+
+/* Bild als PNG (mit Alpha: durchsichtig = zu fuellen, wird in ComfyUI zur Maske) */
+static BOOL comfy_upload(AiJob *j, const UBYTE *px, LONG w, LONG h, LONG comp)
+{
+    static const char bnd[] = "AmiPixelShop-7d3f19c2";
+    MemBuf png = { NULL, 0, 0 };
+    char *p;
+    if (!stbi_write_png_to_func(mem_write, &png, w, h, comp, px, w * comp) || !png.p ||
+        !(j->up = net_alloc(png.n + 512))) {
+        free(png.p);
+        status_message("Not enough memory");
+        return FALSE;
+    }
+    p = j->up;
+    sprintf(p, "--%s\r\nContent-Disposition: form-data; name=\"overwrite\"\r\n\r\ntrue\r\n"
+               "--%s\r\nContent-Disposition: form-data; name=\"image\"; filename=\"" COMFY_IN "\"\r\n"
+               "Content-Type: image/png\r\n\r\n", bnd, bnd);
+    p += strlen(p);
+    memcpy(p, png.p, png.n);
+    p += png.n;
+    sprintf(p, "\r\n--%s--\r\n", bnd);
+    p += strlen(p);
+    j->uplen = p - j->up;
+    free(png.p);
+    sprintf(j->uphdr, "Content-Type: multipart/form-data; boundary=%s\r\n", bnd);
+    return TRUE;
 }
 
 static char *body_image(AiJob *j, char *p)
@@ -326,6 +463,175 @@ static void gemini_answer(AiJob *j, const char *js, LONG status)
     }
 }
 
+/* ab p (bis e) den naechsten nicht leeren String-Wert zu "key" entschluesseln;
+ * *after zeigt dann hinter den Wert */
+static BOOL find_str(const char *p, const char *e, const char *key, char *dst, LONG max, const char **after)
+{
+    LONG kl = strlen(key);
+    for (; p + kl + 2 < e; p++) {
+        const char *v, *ve;
+        if (*p != '"' || memcmp(p + 1, key, kl) || p[kl + 1] != '"')
+            continue;
+        for (v = p + kl + 2; v < e && (*v == ':' || (UBYTE)*v <= ' '); v++)
+            ;
+        if (v >= e || *v != '"')
+            continue;
+        for (ve = v + 1; ve < e && *ve != '"'; ve++)
+            if (*ve == '\\')
+                ve++;
+        if (ve >= e)
+            return FALSE;
+        if (ve - v > 1) {
+            json_str(v, ve + 1 - v, dst, max);
+            if (after)
+                *after = ve + 1;
+            return TRUE;
+        }
+    }
+    return FALSE;
+}
+
+static void cat_limit(char *d, const char *s, LONG max)
+{
+    LONG n = strlen(d);
+    while (*s && n < max - 1)
+        d[n++] = *s++;
+    d[n] = 0;
+}
+
+/* Fehlertext aus einer ComfyUI-Antwort; die "details" nennen meist das Problem
+ * (z. B. ein Modell, das auf dem PC fehlt) */
+static void comfy_err(AiJob *j, NetResp *r, const char *what)
+{
+    const char *js = (const char *)r->body, *v;
+    char det[120];
+    LONG vl;
+    strcpy(j->err, what);
+    if (!js)
+        return;
+    if ((v = json_get(js, "error.message", &vl)) && *v == '"') {
+        cat_limit(j->err, ":\n", sizeof(j->err));
+        json_str(v, vl, j->err + strlen(j->err), sizeof(j->err) - strlen(j->err));
+    }
+    if (find_str(js, js + r->len, "details", det, sizeof(det), NULL) ||
+        find_str(js, js + r->len, "exception_message", det, sizeof(det), NULL)) {
+        cat_limit(j->err, "\n", sizeof(j->err));
+        cat_limit(j->err, det, sizeof(j->err));
+    }
+}
+
+static void url_cat(char *d, const char *s, LONG max)
+{
+    static const char hx[] = "0123456789ABCDEF";
+    LONG n = strlen(d);
+    for (; *s && n < max - 4; s++) {
+        UBYTE c = *s;
+        if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
+            c == '-' || c == '_' || c == '.') {
+            d[n++] = c;
+        } else {
+            d[n++] = '%';
+            d[n++] = hx[c >> 4];
+            d[n++] = hx[c & 15];
+        }
+    }
+    d[n] = 0;
+}
+
+/* ComfyUI: Bild hochladen, Workflow einreihen, auf das Ergebnis warten, Bild holen */
+static void comfy_run(AiJob *j)
+{
+    NetResp r;
+    const char *v, *js, *a;
+    LONG vl, t, k;
+    char id[64], kp[96], path[320], fn[100], sub[100], type[16];
+
+    if (!net_http(j->host, j->port, FALSE, "POST", "/upload/image", j->uphdr, j->up, j->uplen, &r, &j->ctl)) {
+        strcpy(j->err, r.err);
+        return;
+    }
+    if (r.status != 200) {
+        comfy_err(j, &r, "Upload to ComfyUI failed");
+        net_free(&r);
+        return;
+    }
+    net_free(&r);
+    if (!net_http(j->host, j->port, FALSE, "POST", "/prompt", j->hdr, j->body, j->blen, &r, &j->ctl)) {
+        strcpy(j->err, r.err);
+        return;
+    }
+    if (r.status != 200 || !(v = json_get((const char *)r.body, "prompt_id", &vl)) || *v != '"') {
+        comfy_err(j, &r, "ComfyUI rejected the workflow");
+        net_free(&r);
+        return;
+    }
+    json_str(v, vl, id, sizeof(id));
+    net_free(&r);
+
+    /* fertig, sobald der Auftrag in der History steht (beim ersten Mal laedt der PC die Modelle) */
+    strcpy(path, "/history/");
+    cat_limit(path, id, sizeof(path));
+    for (t = 0;; t++) {
+        for (k = 0; k < 5; k++) {
+            if (j->ctl.cancel) {
+                strcpy(j->err, "Cancelled");
+                return;
+            }
+            Delay(10);
+        }
+        if (t >= 900) {                 /* 1 s je Runde */
+            strcpy(j->err, "ComfyUI did not finish within 15 minutes");
+            return;
+        }
+        if (!net_http(j->host, j->port, FALSE, "GET", path, NULL, NULL, 0, &r, &j->ctl)) {
+            strcpy(j->err, r.err);
+            return;
+        }
+        if (r.status == 200 && json_get((const char *)r.body, id, &vl))
+            break;
+        net_free(&r);
+    }
+    js = (const char *)r.body;
+    strcpy(kp, id);
+    strcat(kp, ".status.status_str");
+    if ((v = json_get(js, kp, &vl)) && strstr_n(v, vl, "error")) {
+        comfy_err(j, &r, "The ComfyUI workflow failed");
+        net_free(&r);
+        return;
+    }
+    strcpy(kp, id);
+    strcat(kp, ".outputs");
+    if (!(v = json_get(js, kp, &vl)) || !find_str(v, v + vl, "filename", fn, sizeof(fn), &a)) {
+        strcpy(j->err, "The workflow returned no image (it needs a Save Image node)");
+        net_free(&r);
+        return;
+    }
+    sub[0] = 0;
+    strcpy(type, "output");
+    find_str(a, v + vl, "subfolder", sub, sizeof(sub), NULL);
+    find_str(a, v + vl, "type", type, sizeof(type), NULL);
+    net_free(&r);
+
+    strcpy(path, "/view?filename=");
+    url_cat(path, fn, sizeof(path));
+    cat_limit(path, "&subfolder=", sizeof(path));
+    url_cat(path, sub, sizeof(path));
+    cat_limit(path, "&type=", sizeof(path));
+    url_cat(path, type, sizeof(path));
+    if (!net_http(j->host, j->port, FALSE, "GET", path, NULL, NULL, 0, &r, &j->ctl)) {
+        strcpy(j->err, r.err);
+        return;
+    }
+    if (r.status == 200 && r.len > 0) {
+        j->img = r.body;                /* PNG, wie geliefert */
+        j->imglen = r.len;
+        j->ok = TRUE;
+    } else {
+        strcpy(j->err, "Cannot download the result from ComfyUI");
+        net_free(&r);
+    }
+}
+
 static void ai_worker(void)
 {
     AiJob *j = job;
@@ -333,8 +639,10 @@ static void ai_worker(void)
     const char *v;
     LONG vl;
 
-    if (!net_https(j->prov == PROV_GEMINI ? GEM_HOST : AI_HOST, "POST", j->path, j->hdr, j->body, j->blen,
-                   &r, &j->ctl)) {
+    if (j->prov == PROV_COMFY) {
+        comfy_run(j);
+    } else if (!net_https(j->prov == PROV_GEMINI ? GEM_HOST : AI_HOST, "POST", j->path, j->hdr, j->body,
+                          j->blen, &r, &j->ctl)) {
         strcpy(j->err, r.err);
     } else if (j->prov == PROV_GEMINI) {
         gemini_answer(j, (const char *)r.body, r.status);
@@ -383,6 +691,7 @@ static void job_free(AiJob *j)
     if (!j)
         return;
     net_freemem(j->body);
+    net_freemem(j->up);
     net_freemem(j->img);
     free(j->sel);
     FreeVec(j);
@@ -999,8 +1308,9 @@ static AiJob *job_new(void)
     if (!read_key(key, sizeof(key))) {
         char msg[160];
         FreeVec(j);
-        sprintf(msg, "No %s API key found.\n\nEnter it with Edit > AI API Key...\n(stored in %s)",
-                prov_name[ai_provider], key_files[ai_provider][1]);
+        sprintf(msg, "No %s %s found.\n\nEnter it with Edit > AI API Key...\n(stored in %s)",
+                prov_name[ai_provider], ai_provider == PROV_COMFY ? "server address" : "API key",
+                key_files[ai_provider][1]);
         request(msg, "OK");
         return NULL;
     }
@@ -1009,7 +1319,10 @@ static AiJob *job_new(void)
         return NULL;
     }
     j->prov = ai_provider;
-    if (j->prov == PROV_GEMINI)
+    if (j->prov == PROV_COMFY) {
+        comfy_addr(key, j->host, sizeof(j->host), &j->port);
+        strcpy(j->hdr, "Content-Type: application/json\r\n");
+    } else if (j->prov == PROV_GEMINI)
         sprintf(j->hdr, "x-goog-api-key: %s\r\nContent-Type: application/json\r\n", key);
     else
         sprintf(j->hdr, "Authorization: Bearer %s\r\nContent-Type: application/json\r\n"
@@ -1108,6 +1421,57 @@ static void smear_fill(UBYTE *rgb, UBYTE *empty, LONG w, LONG h)
     free(nxt);
 }
 
+/* ComfyUI: Ausschnitt als PNG, zu fuellender Bereich (Auswahl und Leeres) durchsichtig;
+ * der Workflow malt nur dort. Gibt rgb/rgb_empty frei. */
+static BOOL comfy_fill(AiJob *j, UBYTE *rgb, UBYTE *rgb_empty, LONG sw, LONG sh, BOOL remove, const char *prompt)
+{
+    UBYTE *rgba = malloc(sw * sh * 4);
+    LONG x, y, i;
+    BOOL ok;
+
+    if (rgba)
+        for (y = 0; y < sh; y++)
+            for (x = 0; x < sw; x++) {
+                LONG ox = x * j->w / sw, oy = y * j->h / sh;
+                BOOL empty = (doc->flat[(j->y + oy) * doc->w + j->x + ox] >> 24) < 128;
+                rgba[(y * sw + x) * 4 + 3] = empty || j->sel[oy * j->w + ox] >= 128 ? 0 : 255;
+                if (rgb_empty)
+                    rgb_empty[y * sw + x] = empty;
+            }
+    if (rgb_empty)                      /* Leeres mit Randfarben vorfuellen (fuer Workflows mit denoise < 1) */
+        smear_fill(rgb, rgb_empty, sw, sh);
+    if (rgba)
+        for (i = 0; i < sw * sh; i++) {
+            rgba[i * 4] = rgb[i * 3];
+            rgba[i * 4 + 1] = rgb[i * 3 + 1];
+            rgba[i * 4 + 2] = rgb[i * 3 + 2];
+        }
+    free(rgb);
+    free(rgb_empty);
+    if (!remove)
+        sprintf(j->name, "Gen: %.26s", prompt);
+    else
+        strcpy(j->name, j->grow ? "Gen: Remove" : "Gen: Extend");
+    j->mode = !remove ? GEN_FILL : j->grow ? GEN_REMOVE : GEN_EXTEND;
+    if (!remove)
+        ;
+    else if (j->grow)
+        prompt = "empty background, seamless continuation of the surroundings, no objects";
+    else
+        prompt = "seamless continuation of the scene";
+    j->grow = FALSE;                    /* ComfyUI aendert nur die Maske, nichts nachzuziehen */
+    ok = rgba && comfy_body(j, remove && have_workflow("comfy_remove.json") ? "comfy_remove.json" :
+                            "comfy_fill.json", prompt) && comfy_upload(j, rgba, sw, sh, 4);
+    if (!rgba)
+        status_message("Not enough memory");
+    free(rgba);
+    if (!ok) {
+        job_free(j);
+        return FALSE;
+    }
+    return job_launch(j);
+}
+
 static BOOL start_fill(const char *prompt, Layer *target);
 
 BOOL ai_start(const char *prompt)
@@ -1160,6 +1524,10 @@ static BOOL start_fill(const char *prompt, Layer *target)
     x = lng < AI_MINSIDE ? AI_MINSIDE : lng > AI_MAXSIDE ? AI_MAXSIDE : lng;
     sw = (bw * x + lng / 2) / lng;
     sh = (bh * x + lng / 2) / lng;
+    if (j->prov == PROV_COMFY) {        /* VAE: Vielfache von 16, sonst schneidet ComfyUI ab */
+        sw = (sw + 8) & ~15;
+        sh = (sh + 8) & ~15;
+    }
 
     j->kind = AI_FILL;
     j->target = target;
@@ -1193,6 +1561,8 @@ static BOOL start_fill(const char *prompt, Layer *target)
      * Grau liessen die Modelle schmale Streifen als "Balken" stehen. */
     j->grow = remove && nempty * 4 <= nfill;
     smear = nempty > 0 && (rgb_empty = malloc(sw * sh)) != NULL;
+    if (j->prov == PROV_COMFY)
+        return comfy_fill(j, rgb, rgb_empty, sw, sh, remove, prompt);
     for (y = 0; y < sh; y++)
         for (x = 0; x < sw; x++) {
             LONG ox = x * bw / sw, oy = y * bh / sh;
@@ -1642,6 +2012,15 @@ BOOL ai_segment(LONG kind)
         memcpy(rgb + ((j->iy0 + y) * sw + j->ix0) * 3, in + y * j->iw * 3, j->iw * 3);
     free(in);
     in = NULL;
+    if (j->prov == PROV_COMFY) {        /* Workflow liefert die Maske als Schwarz-Weiss-Bild */
+        BOOL ok = comfy_body(j, "comfy_segment.json", "main subject") && comfy_upload(j, rgb, sw, sh, 3);
+        free(rgb);
+        if (!ok) {
+            job_free(j);
+            return FALSE;
+        }
+        return job_launch(j);
+    }
     if (!stbi_write_jpg_to_func(mem_write, &jpg, sw, sh, 3, rgb, 92) || !jpg.p)
         goto fail;
     free(rgb);
@@ -1680,7 +2059,7 @@ void ai_settings(void)
 {
     LONG pv = ai_provider, fm = ai_fill_model, rm = ai_fast_model, nv = ai_variants - 1;
     DlgSlider ds[4] = {
-        { "Provider:", &pv, DLG_CHOICE, DLG_CHOICE, "OpenRouter|Google Gemini", 1 },
+        { "Provider:", &pv, DLG_CHOICE, DLG_CHOICE, "OpenRouter|Google Gemini|ComfyUI (LAN)", 1 },
         { "Fill model:", &fm, DLG_CHOICE, DLG_CHOICE, "Nano Banana 2.1|Nano Banana Pro|Flash Lite (fast)", 1 },
         { "Remove/Extend:", &rm, DLG_CHOICE, DLG_CHOICE, "Flash Lite (fast)|Nano Banana 2.1", 1 },
         { "Variants:", &nv, DLG_CHOICE, DLG_CHOICE, "1|2|3", 1 },
@@ -1703,8 +2082,9 @@ void ai_settings(void)
 void ai_key_dialog(void)
 {
     const char **files = key_files[ai_provider], *pn = prov_name[ai_provider];
-    BOOL gem = ai_provider == PROV_GEMINI;
-    char key[160], hdr[220], msg[240], val[40];
+    BOOL gem = ai_provider == PROV_GEMINI, comfy = ai_provider == PROV_COMFY;
+    char key[160], hdr[220], msg[240], val[40], host[64];
+    LONG port;
     LONG bw = 560, bh = 118, bx = cvx + (cvw - bw) / 2, by = cvy + (cvh - bh) / 2, k;
     NetResp r;
     NetCtl ctl;
@@ -1719,9 +2099,10 @@ void ai_key_dialog(void)
     fill(bx, by, bw, bh, COL_PANEL);
     frame(bx, by, bw, bh, COL_LINE);
     fill(bx, by, bw, 26, COL_PANELHD);
-    sprintf(msg, "%s API Key", pn);
+    sprintf(msg, comfy ? "%s Server" : "%s API Key", pn);
     text_bold(bx + 12, by + 4, msg, COL_TEXT);
-    text(bx + 12, by + 36, gem ? "Key (aistudio.google.com/apikey), Return to save:" :
+    text(bx + 12, by + 36, comfy ? "Address of the ComfyUI PC (e.g. 192.168.1.20:8188):" :
+                           gem ? "Key (aistudio.google.com/apikey), Return to save:" :
                                  "Key (openrouter.ai/keys), Return to save:", COL_DIM);
     sprintf(msg, "Stored in %s", files[1]);
     text(bx + 12, by + 92, msg, COL_DIM);
@@ -1743,9 +2124,28 @@ void ai_key_dialog(void)
         }
     }
     /* pruefen: Guthaben abfragen */
-    status_message("Checking the key...");
+    status_message(comfy ? "Connecting to ComfyUI..." : "Checking the key...");
     memset(&ctl, 0, sizeof(ctl));
     ctl.timeout = 20;
+    if (comfy) {
+        comfy_addr(key, host, sizeof(host), &port);
+        if (!net_http(host, port, FALSE, "GET", "/system_stats", NULL, NULL, 0, &r, &ctl)) {
+            sprintf(msg, "The address was saved, but ComfyUI could not be reached:\n\n%s\n\n"
+                         "Start ComfyUI with --listen so other computers can connect.", r.err);
+        } else {
+            if (r.status != 200)
+                sprintf(msg, "The address was saved, but the server answered HTTP %ld.", (long)r.status);
+            else if ((v = json_get((char *)r.body, "devices.0.name", &vl)) && *v == '"' &&
+                     json_str(v, vl, val, sizeof(val)) > 0)
+                sprintf(msg, "ComfyUI is reachable.\n\nGPU: %s", val);
+            else
+                strcpy(msg, "ComfyUI is reachable.");
+            net_free(&r);
+        }
+        status_message("");
+        request(msg, "OK");
+        return;
+    }
     sprintf(hdr, gem ? "x-goog-api-key: %s\r\n" : "Authorization: Bearer %s\r\n", key);
     if (!net_https(gem ? GEM_HOST : AI_HOST, "GET", gem ? "/v1beta/models?pageSize=1" : "/api/v1/key",
                    hdr, NULL, 0, &r, &ctl)) {
