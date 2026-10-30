@@ -79,7 +79,10 @@ make            # produces build/AmiPixelShop
 sh tools/mkpkg.sh   # build/AmiPixelShop.lha and the update package
 ```
 
-Or with Docker (same image as the GitHub Actions build in `.github/workflows/build.yml`):
+The gcc 16 toolchain (bebbo's `amiga16.2`, with NDK 3.2, Roadshow, P96 and AmiSSL headers) can be
+built on Linux or WSL with `sh tools/build-gcc16.sh /opt/amiga16` (30-60 minutes), then
+`make PATH=/opt/amiga16/bin:$PATH`. GitHub Actions (`.github/workflows/build.yml`) does the same,
+with the toolchain cached, and cross-checks with gcc 6.5 in Docker:
 
 ```sh
 docker run --rm -v "$PWD":/src -w /src sacredbanana/amiga-compiler:m68k-amigaos make

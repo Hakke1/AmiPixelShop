@@ -8,41 +8,77 @@ on:
   workflow_dispatch:
 
 jobs:
-  amiga:
+  # Main build: bebbo's gcc 16 (amiga16.2), like the upstream author's toolchain.
+  # The toolchain is built once by tools/build-gcc16.sh (30-60 minutes) and cached;
+  # it is rebuilt only when that script changes.
+  gcc16:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - id: tc
+        run: echo "key=amiga-gcc16-$(sha256sum tools/build-gcc16.sh | cut -c1-16)" >> "$GITHUB_OUTPUT"
+      - id: cache
+        uses: actions/cache@v4
+        with:
+          path: /opt/amiga16
+          key: ${{ steps.tc.outputs.key }}
+      - name: Build the toolchain
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq make git wget gcc g++ libgmp-dev libmpfr-dev libmpc-dev flex bison \
+               gettext texinfo libncurses-dev autoconf rsync lhasa
+          sudo mkdir -p /opt/amiga16 && sudo chown "$USER" /opt/amiga16
+          sh tools/build-gcc16.sh /opt/amiga16
+      - name: Build
+        run: |
+          sudo apt-get install -y -qq lhasa
+          export PATH=/opt/amiga16/bin:$PATH
+          m68k-amigaos-gcc --version | head -n 1
+          make -j"$(nproc)" build/AmiPixelShop
+      - name: Archive and update package
+        run: |
+          export PATH=/opt/amiga16/bin:$PATH
+          sh tools/mkpkg.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AmiPixelShop-gcc16
+          path: |
+            build/AmiPixelShop.lha
+            build/AmiPixelShop.upd
+
+  # Cross-check with the ready-made gcc 6.5 image (quick, no toolchain build).
+  gcc6:
     runs-on: ubuntu-latest
     container:
       # bebbo's m68k-amigaos-gcc with NDK 3.2, AmiSSL, P96 and Roadshow headers, vasm and lha
       image: sacredbanana/amiga-compiler:m68k-amigaos@sha256:c3f7b87d571a3d8a8e8d49d0ad798a08483d17363adc0488925b28772e0b3a65
     steps:
       - uses: actions/checkout@v4
-      - name: Toolchain
+      - name: Build
         run: |
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
-          command -v m68k-amigaos-gcc vasmm68k_mot lha python3
           m68k-amigaos-gcc --version | head -n 1
-      - name: Build
-        run: make -j"$(nproc)" build/AmiPixelShop
-      - name: Archive and update package
-        run: sh tools/mkpkg.sh
+          make -j"$(nproc)" build/AmiPixelShop
+          sh tools/mkpkg.sh
       - uses: actions/upload-artifact@v4
         with:
-          name: AmiPixelShop-amiga
-          path: |
-            build/AmiPixelShop.lha
-            build/AmiPixelShop.upd
+          name: AmiPixelShop-gcc6
+          path: build/AmiPixelShop.lha
 
   # A tag like v0.6.2 (higher than src/version.h of installed copies) makes a GitHub
-  # release, which the built-in updater (src/update.c, UPD_REPO) offers at start.
+  # release with the gcc 16 build, which the built-in updater (src/update.c, UPD_REPO)
+  # offers at start.
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: amiga
+    needs: [gcc16, gcc6]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: AmiPixelShop-amiga
+          name: AmiPixelShop-gcc16
       - uses: softprops/action-gh-release@v2
         with:
           files: |
