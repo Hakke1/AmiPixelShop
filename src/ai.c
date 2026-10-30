@@ -1,5 +1,6 @@
 /*
- * ai.c - KI-Funktionen ueber OpenRouter: Generative Fill und Remove
+ * ai.c - KI-Funktionen ueber OpenRouter oder direkt Google Gemini:
+ * Generative Fill und Remove
  *
  * Ablauf: Ausschnitt um die Auswahl (mit Umgebung) als JPEG und die Auswahl
  * als Schwarz-Weiss-Maske an ein Bildmodell schicken. Die Anfrage laeuft in
@@ -22,6 +23,7 @@ void main_activate_doc(Doc *d);
 BOOL crop_active(void);
 
 #define AI_HOST     "openrouter.ai"
+#define GEM_HOST    "generativelanguage.googleapis.com"
 #define AI_MINSIDE  768         /* lange Seite des gesendeten Ausschnitts */
 #define AI_MAXSIDE  1024
 
@@ -30,6 +32,8 @@ typedef struct AiJob {
     char *body;                 /* JSON-Anfrage (net_alloc) */
     LONG blen;
     char hdr[320];              /* Kopfzeilen mit Schluessel */
+    LONG prov;                  /* PROV_* */
+    char path[160];             /* Anfragepfad (Gemini: mit Modellname) */
     struct Task *parent;
     LONG sig;
     volatile LONG done;
@@ -60,7 +64,12 @@ static AiJob *job;              /* laufende Anfrage oder NULL */
 static const char *fill_models[] = { "google/gemini-nano-banana-2.1", "google/gemini-3-pro-image",
                                      "google/gemini-3.1-flash-lite-image" };
 static const char *fast_models[] = { "google/gemini-3.1-flash-lite-image", "google/gemini-nano-banana-2.1" };
-LONG ai_fill_model, ai_fast_model, ai_variants = 1;
+LONG ai_fill_model, ai_fast_model, ai_variants = 1, ai_provider;
+enum { PROV_OPENROUTER, PROV_GEMINI };
+static const char *prov_name[] = { "OpenRouter", "Google Gemini" };
+static const char *key_files[][2] = {
+    { "ENV:AmiPixelShop/openrouter.key", "ENVARC:AmiPixelShop/openrouter.key" },
+    { "ENV:AmiPixelShop/gemini.key", "ENVARC:AmiPixelShop/gemini.key" } };
 static LONG session_mc;         /* Kosten dieser Sitzung, 1/100 Cent */
 static LONG regen_left;         /* noch zu erzeugende Varianten */
 static Layer *regen_layer;
@@ -88,8 +97,8 @@ static BOOL read_small(const char *path, char *buf, LONG max)
 
 static BOOL read_key(char *key, LONG max)
 {
-    return read_small("ENV:AmiPixelShop/openrouter.key", key, max) ||
-           read_small("ENVARC:AmiPixelShop/openrouter.key", key, max);
+    return read_small(key_files[ai_provider][0], key, max) ||
+           read_small(key_files[ai_provider][1], key, max);
 }
 
 static const char *model_name(BOOL fill)
@@ -97,6 +106,9 @@ static const char *model_name(BOOL fill)
     if (!read_small("ENV:AmiPixelShop/ai_model", ai_model, sizeof(ai_model)) &&
         !read_small("ENVARC:AmiPixelShop/ai_model", ai_model, sizeof(ai_model)))
         strcpy(ai_model, fill ? fill_models[ai_fill_model] : fast_models[ai_fast_model]);
+    /* Gemini direkt: gleiche Modelle, ohne den OpenRouter-Praefix */
+    if (ai_provider == PROV_GEMINI && !strncmp(ai_model, "google/", 7))
+        memmove(ai_model, ai_model + 7, strlen(ai_model + 7) + 1);
     return ai_model;
 }
 
@@ -127,6 +139,37 @@ static const UBYTE ratios[][2] = {
     { 1, 1 }, { 5, 4 }, { 4, 5 }, { 4, 3 }, { 3, 4 }, { 3, 2 }, { 2, 3 },
     { 16, 9 }, { 9, 16 }, { 21, 9 }
 };
+
+/* Anfrage-JSON in zwei Formaten: OpenRouter (OpenAI-Chat) und Gemini generateContent.
+ * body_start schreibt bis zum Beginn des Prompt-Textes, body_image bis zum Beginn
+ * der Base64-JPEG-Daten; danach schliesst BODY_END beide Formate. */
+#define BODY_END "\"}}]}]}"
+
+static char *body_start(AiJob *j, char *p, BOOL fill, LONG ri)
+{
+    const char *m = model_name(fill);
+    if (j->prov == PROV_GEMINI) {
+        sprintf(j->path, "/v1beta/models/%.100s:generateContent", m);
+        sprintf(p, "{\"generationConfig\":{\"responseModalities\":[\"TEXT\",\"IMAGE\"],"
+                   "\"imageConfig\":{\"aspectRatio\":\"%ld:%ld\"}},"
+                   "\"contents\":[{\"role\":\"user\",\"parts\":[{\"text\":\"",
+                (long)ratios[ri][0], (long)ratios[ri][1]);
+    } else {
+        strcpy(j->path, "/api/v1/chat/completions");
+        sprintf(p, "{\"model\":\"%s\",\"modalities\":[\"image\",\"text\"],"
+                   "\"image_config\":{\"aspect_ratio\":\"%ld:%ld\"},\"usage\":{\"include\":true},"
+                   "\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"",
+                m, (long)ratios[ri][0], (long)ratios[ri][1]);
+    }
+    return p + strlen(p);
+}
+
+static char *body_image(AiJob *j, char *p)
+{
+    strcpy(p, j->prov == PROV_GEMINI ? "\"},{\"inline_data\":{\"mime_type\":\"image/jpeg\",\"data\":\"" :
+              "\"},{\"type\":\"image_url\",\"image_url\":{\"url\":\"data:image/jpeg;base64,");
+    return p + strlen(p);
+}
 
 /* Ausschnitt: Auswahl plus Umgebung, auf ein unterstuetztes Seitenverhaeltnis
  * erweitert; liefert den Index in ratios */
@@ -224,6 +267,65 @@ static BOOL strstr_n(const char *s, LONG n, const char *w)
     return FALSE;
 }
 
+static void refused(AiJob *j, const char *v, LONG vl)
+{
+    strcpy(j->err, strstr_n(v, vl, "RECITATION") ?
+           "The model refused: the result would be too similar to an existing\n"
+           "(published) image. Try a larger selection or add a prompt." :
+           "The request was blocked by the model's safety filter.");
+}
+
+/* Gemini generateContent: Bild im letzten inlineData-Teil (ohne Denk-Zwischenbilder) */
+static void gemini_answer(AiJob *j, const char *js, LONG status)
+{
+    char path[64];
+    const char *v, *img = NULL;
+    LONG vl, il = 0, k, n;
+
+    if (status != 200) {
+        if ((v = json_get(js, "error.message", &vl)))
+            json_str(v, vl, j->err, sizeof(j->err));
+        else
+            strcpy(j->err, "Server error");
+        return;
+    }
+    for (k = 0; k < 10; k++) {
+        strcpy(path, "candidates.0.content.parts.");
+        n = strlen(path);
+        path[n++] = '0' + k;
+        path[n] = 0;
+        if (!json_get(js, path, &vl))   /* Teil k vorhanden? */
+            break;
+        path[n++] = '.';
+        strcpy(path + n, "thought");
+        if ((v = json_get(js, path, &vl)) && *v == 't')
+            continue;
+        strcpy(path + n, "inlineData.data");
+        if ((v = json_get(js, path, &vl)) && vl > 2) {
+            img = v;
+            il = vl;
+        }
+    }
+    if (img) {
+        if ((j->img = net_alloc(il)))
+            j->imglen = b64_decode(img + 1, il - 2, j->img);
+        if (j->imglen > 0)
+            j->ok = TRUE;
+        else
+            strcpy(j->err, "Invalid image in the answer");
+    } else if (((v = json_get(js, "candidates.0.finishReason", &vl)) ||
+                (v = json_get(js, "promptFeedback.blockReason", &vl))) && vl > 2 &&
+               (strstr_n(v, vl, "RECITATION") || strstr_n(v, vl, "SAFETY") ||
+                strstr_n(v, vl, "PROHIBITED") || strstr_n(v, vl, "BLOCK"))) {
+        refused(j, v, vl);
+    } else if ((v = json_get(js, "candidates.0.content.parts.0.text", &vl)) && *v == '"') {
+        strcpy(j->err, "No image: ");
+        json_str(v, vl, j->err + 10, sizeof(j->err) - 10);
+    } else {
+        strcpy(j->err, "The model returned no image");
+    }
+}
+
 static void ai_worker(void)
 {
     AiJob *j = job;
@@ -231,8 +333,12 @@ static void ai_worker(void)
     const char *v;
     LONG vl;
 
-    if (!net_https(AI_HOST, "POST", "/api/v1/chat/completions", j->hdr, j->body, j->blen, &r, &j->ctl)) {
+    if (!net_https(j->prov == PROV_GEMINI ? GEM_HOST : AI_HOST, "POST", j->path, j->hdr, j->body, j->blen,
+                   &r, &j->ctl)) {
         strcpy(j->err, r.err);
+    } else if (j->prov == PROV_GEMINI) {
+        gemini_answer(j, (const char *)r.body, r.status);
+        net_free(&r);
     } else {
         const char *js = (const char *)r.body;
         if (r.status != 200) {
@@ -256,10 +362,7 @@ static void ai_worker(void)
             }
         } else if ((v = json_get(js, "choices.0.native_finish_reason", &vl)) && vl > 2 &&
                    (strstr_n(v, vl, "RECITATION") || strstr_n(v, vl, "SAFETY") || strstr_n(v, vl, "PROHIBITED"))) {
-            strcpy(j->err, strstr_n(v, vl, "RECITATION") ?
-                   "The model refused: the result would be too similar to an existing\n"
-                   "(published) image. Try a larger selection or add a prompt." :
-                   "The request was blocked by the model's safety filter.");
+            refused(j, v, vl);
         } else if ((v = json_get(js, "choices.0.message.content", &vl)) && *v == '"') {
             strcpy(j->err, "No image: ");
             json_str(v, vl, j->err + 10, sizeof(j->err) - 10);
@@ -894,17 +997,23 @@ static AiJob *job_new(void)
     if (!(j = AllocVec(sizeof(AiJob), MEMF_ANY | MEMF_CLEAR)))
         return NULL;
     if (!read_key(key, sizeof(key))) {
+        char msg[160];
         FreeVec(j);
-        request("No OpenRouter API key found.\n\nPut your key into the file\n"
-                "ENVARC:AmiPixelShop/openrouter.key", "OK");
+        sprintf(msg, "No %s API key found.\n\nEnter it with Edit > AI API Key...\n(stored in %s)",
+                prov_name[ai_provider], key_files[ai_provider][1]);
+        request(msg, "OK");
         return NULL;
     }
     if (ai_sigbit < 0 && (ai_sigbit = AllocSignal(-1)) < 0) {
         FreeVec(j);
         return NULL;
     }
-    sprintf(j->hdr, "Authorization: Bearer %s\r\nContent-Type: application/json\r\n"
-                    "X-Title: AmiPixelShop\r\n", key);
+    j->prov = ai_provider;
+    if (j->prov == PROV_GEMINI)
+        sprintf(j->hdr, "x-goog-api-key: %s\r\nContent-Type: application/json\r\n", key);
+    else
+        sprintf(j->hdr, "Authorization: Bearer %s\r\nContent-Type: application/json\r\n"
+                        "X-Title: AmiPixelShop\r\n", key);
     j->doc = doc;
     j->parent = FindTask(NULL);
     j->sig = ai_sigbit;
@@ -1127,12 +1236,8 @@ static BOOL start_fill(const char *prompt, Layer *target)
     jl = l64 + strlen(esc) + sizeof(task) + sizeof(mark) + sizeof(smeared) + 1024;
     if (!(j->body = net_alloc(jl)))
         goto fail;
-    p = j->body;
-    sprintf(p, "{\"model\":\"%s\",\"modalities\":[\"image\",\"text\"],"
-               "\"image_config\":{\"aspect_ratio\":\"%ld:%ld\"},\"usage\":{\"include\":true},"
-               "\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"%s",
-            model_name(!remove), (long)ratios[ri][0], (long)ratios[ri][1],
-            j->grow ? mark : smear ? smeared : task);
+    p = body_start(j, j->body, !remove, ri);
+    strcpy(p, j->grow ? mark : smear ? smeared : task);
     p += strlen(p);
     if (j->grow)
         ;
@@ -1143,11 +1248,10 @@ static BOOL start_fill(const char *prompt, Layer *target)
     else
         sprintf(p, "In the gray areas, paint: %s. Blend it naturally into the scene.", esc);
     p += strlen(p);
-    strcpy(p, "\"},{\"type\":\"image_url\",\"image_url\":{\"url\":\"data:image/jpeg;base64,");
-    p += strlen(p);
+    p = body_image(j, p);
     memcpy(p, e64, l64);
     p += l64;
-    strcpy(p, "\"}}]}]}");
+    strcpy(p, BODY_END);
     p += strlen(p);
     j->blen = p - j->body;
     net_freemem(e64);
@@ -1548,16 +1652,12 @@ BOOL ai_segment(LONG kind)
     jpg.p = NULL;
     if (!(j->body = net_alloc(l64 + sizeof(task) + 1024)))
         goto fail;
-    p = j->body;
-    sprintf(p, "{\"model\":\"%s\",\"modalities\":[\"image\",\"text\"],"
-               "\"image_config\":{\"aspect_ratio\":\"%ld:%ld\"},\"usage\":{\"include\":true},"
-               "\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"%s\"},"
-               "{\"type\":\"image_url\",\"image_url\":{\"url\":\"data:image/jpeg;base64,",
-            model_name(FALSE), (long)ratios[ri][0], (long)ratios[ri][1], task);
-    p += strlen(p);
+    p = body_start(j, j->body, FALSE, ri);
+    strcpy(p, task);
+    p = body_image(j, p + strlen(p));
     memcpy(p, e64, l64);
     p += l64;
-    strcpy(p, "\"}}]}]}");
+    strcpy(p, BODY_END);
     p += strlen(p);
     j->blen = p - j->body;
     net_freemem(e64);
@@ -1578,14 +1678,16 @@ fail:
 /* Edit > AI Settings... */
 void ai_settings(void)
 {
-    LONG fm = ai_fill_model, rm = ai_fast_model, nv = ai_variants - 1;
-    DlgSlider ds[3] = {
+    LONG pv = ai_provider, fm = ai_fill_model, rm = ai_fast_model, nv = ai_variants - 1;
+    DlgSlider ds[4] = {
+        { "Provider:", &pv, DLG_CHOICE, DLG_CHOICE, "OpenRouter|Google Gemini", 1 },
         { "Fill model:", &fm, DLG_CHOICE, DLG_CHOICE, "Nano Banana 2.1|Nano Banana Pro|Flash Lite (fast)", 1 },
         { "Remove/Extend:", &rm, DLG_CHOICE, DLG_CHOICE, "Flash Lite (fast)|Nano Banana 2.1", 1 },
         { "Variants:", &nv, DLG_CHOICE, DLG_CHOICE, "1|2|3", 1 },
     };
-    if (!dialog_run("AI Settings", ds, 3, NULL))
+    if (!dialog_run("AI Settings", ds, 4, NULL))
         return;
+    ai_provider = pv;
     ai_fill_model = fm;
     ai_fast_model = rm;
     ai_variants = nv + 1;
@@ -1597,10 +1699,11 @@ void ai_settings(void)
     }
 }
 
-/* Edit > AI API Key...: Schluessel eingeben, speichern und bei OpenRouter pruefen */
+/* Edit > AI API Key...: Schluessel des gewaehlten Anbieters eingeben, speichern und pruefen */
 void ai_key_dialog(void)
 {
-    static const char *files[2] = { "ENV:AmiPixelShop/openrouter.key", "ENVARC:AmiPixelShop/openrouter.key" };
+    const char **files = key_files[ai_provider], *pn = prov_name[ai_provider];
+    BOOL gem = ai_provider == PROV_GEMINI;
     char key[160], hdr[220], msg[240], val[40];
     LONG bw = 560, bh = 118, bx = cvx + (cvw - bw) / 2, by = cvy + (cvh - bh) / 2, k;
     NetResp r;
@@ -1616,9 +1719,12 @@ void ai_key_dialog(void)
     fill(bx, by, bw, bh, COL_PANEL);
     frame(bx, by, bw, bh, COL_LINE);
     fill(bx, by, bw, 26, COL_PANELHD);
-    text_bold(bx + 12, by + 4, "OpenRouter API Key", COL_TEXT);
-    text(bx + 12, by + 36, "Key (openrouter.ai/keys), Return to save:", COL_DIM);
-    text(bx + 12, by + 92, "Stored in ENVARC:AmiPixelShop/openrouter.key", COL_DIM);
+    sprintf(msg, "%s API Key", pn);
+    text_bold(bx + 12, by + 4, msg, COL_TEXT);
+    text(bx + 12, by + 36, gem ? "Key (aistudio.google.com/apikey), Return to save:" :
+                                 "Key (openrouter.ai/keys), Return to save:", COL_DIM);
+    sprintf(msg, "Stored in %s", files[1]);
+    text(bx + 12, by + 92, msg, COL_DIM);
     blit(bx, by, bw, bh);
     if (!ui_edit_text(bx + 12, by + 58, bw - 24, key, sizeof(key)) || !key[0]) {
         view_inval_all();
@@ -1640,11 +1746,15 @@ void ai_key_dialog(void)
     status_message("Checking the key...");
     memset(&ctl, 0, sizeof(ctl));
     ctl.timeout = 20;
-    sprintf(hdr, "Authorization: Bearer %s\r\n", key);
-    if (!net_https(AI_HOST, "GET", "/api/v1/key", hdr, NULL, 0, &r, &ctl)) {
-        sprintf(msg, "The key was saved, but OpenRouter could not be reached:\n\n%s", r.err);
+    sprintf(hdr, gem ? "x-goog-api-key: %s\r\n" : "Authorization: Bearer %s\r\n", key);
+    if (!net_https(gem ? GEM_HOST : AI_HOST, "GET", gem ? "/v1beta/models?pageSize=1" : "/api/v1/key",
+                   hdr, NULL, 0, &r, &ctl)) {
+        sprintf(msg, "The key was saved, but %s could not be reached:\n\n%s", pn, r.err);
     } else if (r.status != 200) {
-        sprintf(msg, "The key was saved, but OpenRouter rejected it (HTTP %ld).", (long)r.status);
+        sprintf(msg, "The key was saved, but %s rejected it (HTTP %ld).", pn, (long)r.status);
+        net_free(&r);
+    } else if (gem) {
+        strcpy(msg, "The key works.");
         net_free(&r);
     } else {
         strcpy(msg, "The key works.");
