@@ -15,6 +15,11 @@
 
 ---
 
+> **About this fork:** AmiPixelShop was created by **radi7777**. The original repository
+> (`github.com/radi7777/AmiPixelShop`) is no longer available, so this fork carries it on. It adds
+> Google Gemini and ComfyUI (local network) as AI providers and a gcc 16 build with tests.
+> The text below is the original author's.
+
 Everyone is talking about **PhotoCraft**-style image editing - full-featured layer editors are available
 on just about every platform today. Now the Amiga gets one too.
 
@@ -27,7 +32,7 @@ as the Amiga allows. Development is done with the help of **Claude** (Anthropic)
 
 > **Early beta - testers wanted!**
 > There are certainly still plenty of bugs. Please report anything you find through
-> [GitHub Issues](https://github.com/radi7777/AmiPixelShop/issues) - every report helps.
+> [GitHub Issues](https://github.com/Hakke1/AmiPixelShop/issues) - every report helps.
 
 ## Features
 
@@ -63,7 +68,7 @@ Classic 68000-68030 machines and AGA/ECS screens are **not** supported.
 
 ## Getting started
 
-1. Download the latest archive from [Releases](https://github.com/radi7777/AmiPixelShop/releases) (also on Aminet).
+1. Download the latest archive from [Releases](https://github.com/Hakke1/AmiPixelShop/releases) (version 0.5 of the original is also on Aminet).
 2. Unpack it, e.g. to `Work:`, and start `AmiPixelShop`.
 3. Choose a screen mode on the first start.
 
@@ -91,7 +96,7 @@ otherwise the math library goes through the Amiga math libraries and clobbers th
 
 ## Reporting bugs
 
-Please open an [issue](https://github.com/radi7777/AmiPixelShop/issues) and include:
+Please open an [issue](https://github.com/Hakke1/AmiPixelShop/issues) and include:
 
 - what you did and what happened
 - your setup: PiStorm model, Emu68 version, AmigaOS version, screen mode, RAM
