@@ -251,7 +251,7 @@ static BOOL comfy_body(AiJob *j, const char *name, const char *prompt, const cha
     }
     for (s = t; (s = strchr(s, '%')); s++)     /* obere Grenze fuer die Zahl der Platzhalter */
         n++;
-    sprintf(seed, "%lu", (unsigned long)((now_us() ^ (++cnt * 2654435761UL)) & 0x7FFFFFFF));
+    sprintf(seed, "%lu", (unsigned long)(((now_us() ^ (++cnt * 2654435761UL)) & 0x7FFFFFFF) | 1));   /* nie 0 */
     etask = NULL;
     if (!(esc = malloc(pl)) || !(etask = malloc(tl)) ||
         !(j->body = net_alloc(strlen(t) + n * ((pl > tl ? pl : tl) + strlen(box)) + 256))) {

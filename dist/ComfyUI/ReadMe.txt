@@ -72,6 +72,11 @@ Your own workflow
                  Qwen-Image-Edit ...)
        %box%     just the region: [y_min, x_min, y_max, x_max], 0 to 1
        %image%, %seed%  as above
+     Note: if you open one of these workflows in ComfyUI's editor, "%seed%"
+     is not a valid number there, so the seed field shows empty or 0 -
+     enter any number (e.g. 12345) to try it in ComfyUI, but put "%seed%"
+     back before saving it for AmiPixelShop. With a fixed number every
+     request gives the same picture.
   4. Save it as ENVARC:AmiPixelShop/comfy_fill.json (or remove/segment).
 
 If a model is missing on the PC, the error message lists the models ComfyUI has.
