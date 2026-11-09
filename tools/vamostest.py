@@ -8,7 +8,8 @@ Braucht: pip install amitools==0.8.1 machine68k==0.3.0
 
 Prueft, dass die PNGs gueltig sind (Chunk-CRCs, zlib-Pruefsumme) und das Bild nach
 Speichern/Laden und nach dem Zusammenfuegen pixelgleich ist. Die Grafik-Bibliotheken
-werden nur vorgetaeuscht; FILTERTEST geht nicht (vamos kennt FSIN nicht).
+werden nur vorgetaeuscht. vamos fehlen FPU-Befehle wie FSIN und FLOGN: FILTERTEST geht
+nicht, LAYERTEST ab 0.7 (Levels-Ebene) auch nicht - dann wird es uebersprungen.
 """
 import math, os, struct, subprocess, sys, zlib
 
@@ -69,8 +70,12 @@ def write_png(path, w, h, rgb):
 
 
 def vamos(exe, work, *args):
+    # je Aufruf ein eigenes Volume-Verzeichnis: ein abgebrochener Lauf laesst seine
+    # RAM:-Platte liegen, und dann startet vamos dort nicht mehr
+    vols = os.path.join(work, "vols", str(len(os.listdir(os.path.join(work, "vols")))))
+    os.makedirs(vols)
     log = subprocess.run(
-        ["vamos", "--vols-base-dir", os.path.join(work, "vols"), "-C", "68040", "-H", "disable",
+        ["vamos", "--vols-base-dir", vols, "-C", "68040", "-H", "disable",
          "-m", "262144", "-s", "512", "-O", LIBS, os.path.abspath(exe)] + list(args),
         cwd=work, capture_output=True, text=True, timeout=1200)
     print(log.stdout.strip())
@@ -82,14 +87,18 @@ def main():
     os.makedirs(os.path.join(work, "out"), exist_ok=True)
     os.makedirs(os.path.join(work, "vols"), exist_ok=True)
     log = vamos(exe, work, "LAYERTEST", "out")
-    if "1 layers after flatten" not in log.stdout:
+    if "1 layers after flatten" in log.stdout:
+        out = os.path.join(work, "out")
+        before = pixels(os.path.join(out, "before.png"))
+        for name in ("after.png", "flat.png"):
+            assert pixels(os.path.join(out, name)) == before, name + " differs from before.png"
+        print("OK: %dx%d, PNGs valid, save/load and flatten pixel-identical" % before[0])
+    elif "unimplemented opmode" in log.stdout + log.stderr:
+        # ab 0.7 nutzt LAYERTEST Levels (pow -> FLOGN/FETOX), das kann vamos nicht
+        print("SKIPPED: LAYERTEST needs an FPU instruction vamos does not emulate")
+    else:
         print(log.stderr[-3000:])
         sys.exit("LAYERTEST did not finish")
-    out = os.path.join(work, "out")
-    before = pixels(os.path.join(out, "before.png"))
-    for name in ("after.png", "flat.png"):
-        assert pixels(os.path.join(out, name)) == before, name + " differs from before.png"
-    print("OK: %dx%d, PNGs valid, save/load and flatten pixel-identical" % before[0])
 
     # JPEG: weiche Verlaeufe mit etwas Struktur, 256x192
     w, h = 256, 192
